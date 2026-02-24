@@ -1,0 +1,14 @@
+
+# Secrets
+jira-secrets.json
+
+# Jira Cycle Time example app
+example/
+
+# 
+node_modules
+dist
+dist-electron
+release
+reelase-simple
+*.local
