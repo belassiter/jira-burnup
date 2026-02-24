@@ -49,6 +49,7 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
         // Let's keep them but maybe sort valid ones to top? 
         // The user can reorder them.
 
+        // eslint-disable-next-line
         setLocalConfigs(newConfigs);
     }, [availableStatuses, statusConfigs, opened]);
 

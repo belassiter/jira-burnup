@@ -64,7 +64,7 @@ ipcMain.handle('has-credentials', async () => {
   try {
     getSecrets();
     return true;
-  } catch (e) {
+  } catch {
     return false;
   }
 });

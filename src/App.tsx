@@ -142,7 +142,7 @@ export default function App() {
                   if (config.jql) {
                       handleFetchData(config.jql);
                   }
-              } catch (err) {
+              } catch {
                   alert("Invalid config file");
               }
           };
