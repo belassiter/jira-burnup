@@ -1,10 +1,10 @@
 import { useState, useEffect, useMemo } from 'react';
-import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, Title } from '@mantine/core';
+import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, SegmentedControl } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import { CredentialsModal } from './components/CredentialsModal';
 import { StatusManager } from './components/StatusManager';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
+import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
 import { extractAllStatuses, processDailySnapshots, Issue } from './utils/dataProcessor';
 import { IconDeviceFloppy, IconFolderOpen } from '@tabler/icons-react';
 
@@ -14,7 +14,7 @@ import '@mantine/dates/styles.css';
 const METRICS = [
   { value: 'customfield_10006', label: 'Story Points' },
   { value: 'count', label: 'Issue Count' },
-  { value: 'customfield_15505', label: 'Run Time' }
+  { value: 'customfield_15505', label: 'Run Time (minutes)' }
 ];
 
 export interface StatusConfig {
@@ -35,6 +35,8 @@ export default function App() {
   // Chart Configuration
   const [dateRange, setDateRange] = useState<[Date | null, Date | null]>([new Date(new Date().setDate(new Date().getDate() - 14)), new Date()]);
   const [metric, setMetric] = useState<string | null>('customfield_10006');
+  const [graphTitle, setGraphTitle] = useState('Burnup Chart');
+  const [graphType, setGraphType] = useState('bar');
   
   // Status State
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
@@ -104,7 +106,9 @@ export default function App() {
           jql,
           dateRange,
           metric,
-          statusConfigs
+          statusConfigs,
+          graphTitle,
+          graphType
       };
       
       try {
@@ -138,6 +142,8 @@ export default function App() {
                   ]);
                   if (config.metric) setMetric(config.metric);
                   if (config.statusConfigs) setStatusConfigs(config.statusConfigs);
+                  if (config.graphTitle) setGraphTitle(config.graphTitle);
+                  if (config.graphType) setGraphType(config.graphType);
 
                   if (config.jql) {
                       handleFetchData(config.jql);
@@ -153,10 +159,14 @@ export default function App() {
 
   const metricLabel = METRICS.find(m => m.value === metric)?.label || metric;
 
+  const ChartComponent = graphType === 'area' ? AreaChart : BarChart;
+  const DataComponent = graphType === 'area' ? Area : Bar as any;
+
   return (
     <AppShell
       header={{ height: 60 }}
       padding="md"
+      layout="alt"
     >
       <AppShell.Header>
         <Group h="100%" px="md" justify="space-between">
@@ -168,7 +178,7 @@ export default function App() {
         </Group>
       </AppShell.Header>
 
-      <AppShell.Main>
+      <AppShell.Main style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <CredentialsModal opened={credentialsOpen} onClose={closeCredentials} />
         <StatusManager 
             opened={statusManagerOpen} 
@@ -178,9 +188,9 @@ export default function App() {
             onConfigsChange={setStatusConfigs}
         />
         
-        <Container fluid>
-            <Stack gap="lg">
-                <Paper p="md" withBorder shadow="sm">
+        <Container fluid style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', paddingBottom: 0 }}>
+            <Stack gap="sm" style={{ flex: 1, height: '100%' }}>
+                <Paper p="xs" withBorder shadow="sm">
                     <Stack>
                         <TextInput 
                             label="JQL Query" 
@@ -192,7 +202,7 @@ export default function App() {
                     </Stack>
                 </Paper>
 
-                <Paper p="md" withBorder shadow="sm">
+                <Paper p="xs" withBorder shadow="sm">
                     <Group align="flex-end">
                          <DatePickerInput
                             type="range"
@@ -210,6 +220,17 @@ export default function App() {
                             searchable
                             style={{ flex: 1 }}
                         />
+                        <Stack gap={0}>
+                            <Text size="sm" fw={500} mb={3}>Graph Type</Text>
+                            <SegmentedControl
+                                value={graphType}
+                                onChange={setGraphType}
+                                data={[
+                                    { label: 'Stacked Bar', value: 'bar' },
+                                    { label: 'Stacked Area', value: 'area' },
+                                ]}
+                            />
+                        </Stack>
                          <Stack gap={0} style={{ flex: 1 }}>
                             <Text size="sm" fw={500} mb={3}>Statuses</Text>
                             <Button 
@@ -225,40 +246,74 @@ export default function App() {
                     </Group>
                 </Paper>
 
-                <Paper p="md" withBorder shadow="sm" h={500}>
-                    <Title order={4} mb="md">Burnup Chart</Title>
-                    <ResponsiveContainer width="100%" height="100%">
-                         <BarChart
-                            data={chartData}
-                            margin={{ top: 20, right: 30, left: 20, bottom: 5 }}
-                        >
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="date" />
-                            <YAxis>
-                                <Label value={metricLabel || ''} angle={-90} position="insideLeft" style={{ textAnchor: 'middle' }} />
-                            </YAxis>
-                            <Tooltip cursor={{fill: 'transparent'}} />
-                            <Legend />
-                            {/* Reverse the order when mapping to bars so the first item in the list (Top)
-                                appears at the Top of the stack. Recharts stacks bottom-to-top by default.
-                            */}
-                            {[...statusConfigs].reverse().filter(s => s.enabled).map((config) => (
-                                <Bar 
-                                    key={config.name} 
-                                    dataKey={config.name} 
-                                    stackId="a" 
-                                    fill={config.color} 
-                                    name={config.name}
-                                />
-                            ))}
-                            
-                            {/* Fallback if no configs but data (loading state or initial) */}
-                            {statusConfigs.length === 0 && availableStatuses.map((status, index) => (
-                                <Bar key={status} dataKey={status} stackId="a" fill={`hsl(${index * 40}, 70%, 50%)`} />
-                            ))}
 
-                        </BarChart>
-                    </ResponsiveContainer>
+                <Paper p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
+                    <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
+                         {/* Legend Placeholder if we move it out of Recharts, but Recharts legend is easier for interaction. 
+                             Using absolute positioning on the title input? No. 
+                             Let's try to put the Title and Legend in a row? 
+                             The Legend is part of the SVG. 
+                             Maybe we can just position the Recharts Legend better?
+                             If the title is textual above the chart, the legend should be to the right of the title?
+                          */}
+                    </div>
+                    <TextInput 
+                        variant="unstyled" 
+                        size="sm"
+                        value={graphTitle} 
+                        onChange={(e) => setGraphTitle(e.currentTarget.value)}
+                        styles={{ 
+                            input: { fontWeight: 700, textAlign: 'center', height: 30, minHeight: 30, marginTop: 5 }, 
+                            root: { marginBottom: 0 } 
+                        }}
+                    />
+                    <div style={{ flex: 1, width: '100%', minHeight: 0, marginTop: 0 }}>
+                        <ResponsiveContainer width="100%" height="100%">
+                            <ChartComponent
+                                data={chartData}
+                                margin={{ top: 0, right: 30, left: 20, bottom: 5 }}
+                            >
+                                <CartesianGrid strokeDasharray="3 3" />
+                                <XAxis dataKey="date" />
+                                <YAxis>
+                                    <Label value={metricLabel || ''} angle={-90} position="insideLeft" style={{ textAnchor: 'middle' }} />
+                                </YAxis>
+                                <Tooltip cursor={{fill: 'transparent'}} />
+                                <Legend verticalAlign="top" align="right" wrapperStyle={{ top: -35, right: 10, lineHeight: '30px' }} />
+                                
+                                {/* Reverse the order when mapping to bars so the first item in the list (Top)
+                                    appears at the Top of the stack. Recharts stacks bottom-to-top by default.
+                                    For AreaChart, we might not want to reverse if it stacks differently, but usually it's compliant.
+                                */}
+                                {[...statusConfigs].reverse().filter(s => s.enabled).map((config) => (
+                                    <DataComponent 
+                                        key={config.name} 
+                                        dataKey={config.name} 
+                                        stackId="a" 
+                                        fill={config.color} 
+                                        stroke={config.color}
+                                        name={config.name}
+                                        type="linear"
+                                        dot={graphType === 'area' ? { fill: config.color, stroke: 'black', strokeWidth: 1, r: 4 } : false}
+                                    />
+                                ))}
+                                
+                                {/* Fallback if no configs but data (loading state or initial) */}
+                                {statusConfigs.length === 0 && availableStatuses.map((status, index) => (
+                                    <DataComponent 
+                                        key={status} 
+                                        dataKey={status} 
+                                        stackId="a" 
+                                        fill={`hsl(${index * 40}, 70%, 50%)`} 
+                                        stroke={`hsl(${index * 40}, 70%, 50%)`}
+                                        type="linear"
+                                        dot={graphType === 'area' ? { stroke: 'black', strokeWidth: 1, r: 4 } : false}
+                                    />
+                                ))}
+
+                            </ChartComponent>
+                        </ResponsiveContainer>
+                    </div>
                 </Paper>
             </Stack>
         </Container>

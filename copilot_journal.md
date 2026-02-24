@@ -34,3 +34,45 @@
 **Design/Architecture Notes**:
 - Recharts stacking order is bottom-to-top based on the order of `<Bar />` components. To make the "Top" status in the list appear at the "Top" of the stack visually, we must render that `<Bar />` last. Hence the `.reverse()` call on the configs before mapping.
 
+**User Request**: "Update UI so there is no scrolling... everything always visible. Default window size to 1200x800. Burnup Chart text should be a field, so I can customize the name of the chart. Legend should be upper right, in-line with the Title. Graph Type options (Stacked Bar vs. Stacked Area). Update Run Time (minutes) so the label is correct."
+
+**Summary of Changes**:
+- **UI Layout**: Switched `AppShell` to use `height: 100vh` and flexbox (`flex-col`, `overflow: hidden`) to eliminate page scrolling. The chart now resizes dynamically to fit the viewport.
+- **Window Management**: Updated `electron/main.ts` to initialize the window at 1200x800 pixels.
+- **Chart Customization**:
+    - Added an editable `TextInput` for the chart title (defaults to "Burnup Chart").
+    - Added a `SegmentedControl` to toggle between **Stacked Bar** and **Stacked Area** chart types.
+    - Updated `METRICS` to include "Run Time (minutes)" with the correct field ID (`customfield_15505`).
+    - Positioned the chart `Legend` in the upper-right corner, inline with the title area using `verticalAlign="top"` and negative margin wrapper styles.
+- **State Management**: Persisted `graphTitle` and `graphType` in `saveConfiguration`/`loadConfiguration`.
+
+**Design/Architecture Notes**:
+- The chart component (`AreaChart` vs `BarChart`) is dynamically selected based on `graphType` state.
+- `ResponsiveContainer` is used to ensure the chart fills the available flex space without overflowing.
+
+**User Request**: "For the stacked area chart, use straight lines, not curved lines to connect datapoints. Show the datapoints as a filled circle. There's a lot of wasted white space around the plot title. Tighten that up a lot. Make the default window size 1200x900 px."
+
+**Summary of Changes**:
+- **Chart Styling**:
+    - Changed `type` from `monotone` to `linear` for both `Area` and `Bar` (Bar ignores it) to ensure straight lines in Area chart.
+    - Added `dot={{ fill: config.color, r: 4 }}` configuration to `DataComponent` when `graphType === 'area'`, enabling filled circular data points.
+- **UI Layout**:
+    - Reduced padding in the Chart `Paper` container from `p="md"` to `p="xs"`.
+    - Reduced `TextInput` size from `xl` to `md` and removed extra vertical margins.
+    - Adjusted `marginTop` of the chart container to tighten the spacing further.
+- **Window Configuration**: Updated `electron/main.ts` default window size to **1200x900**.
+
+**User Request**: "There's still too much space above and below the plot title. Reduce it more. Also, the legend should be vertically aligned with the plot title. Right now it's above. For stacked area plot, make the circles have a thin black outline, so they'll be visible."
+
+**Summary of Changes**:
+- **Layout & Spacing**:
+    - Changed the Chart container `Paper` padding from `p="xs"` to `p={0}`.
+    - Added `position: 'relative'` to the Chart `Paper`.
+    - Set `marginTop: 0` for the chart container div (was previously `-10` then `0`, finally explicitly handled).
+    - Reduced `margin` top in Recharts from `20` to `0`.
+- **Legend Alignment**:
+    - Adjusted the `Legend` `wrapperStyle` to `top: -35px` and `right: 10px` to visually align it with the title input.
+- **Chart Styling**:
+    - Updated the `dot` configuration for `AreaChart`: `{ fill: config.color, stroke: 'black', strokeWidth: 1, r: 4 }`. This adds a black outline to the data points, improving visibility against similar background colors.
+
+
