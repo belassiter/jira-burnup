@@ -4,9 +4,12 @@ import { DatePickerInput } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import { CredentialsModal } from './components/CredentialsModal';
 import { StatusManager } from './components/StatusManager';
-import { AreaChart, Area, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
-import { extractAllStatuses, processDailySnapshots, Issue } from './utils/dataProcessor';
-import { IconDeviceFloppy, IconFolderOpen } from '@tabler/icons-react';
+import { ForecastModal } from './components/ForecastModal';
+import { Area, Bar, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
+import { extractAllStatuses, processDailySnapshots } from './utils/dataProcessor';
+import { generateForecast } from './utils/forecasting';
+import { Issue, StatusConfig, StatusCategory, ForecastConfig } from './types';
+import { IconDeviceFloppy, IconFolderOpen, IconSettings } from '@tabler/icons-react';
 
 import '@mantine/dates/styles.css';
 
@@ -17,15 +20,17 @@ const METRICS = [
   { value: 'customfield_15505', label: 'Run Time (minutes)' }
 ];
 
-export interface StatusConfig {
-    name: string;
-    color: string;
-    enabled: boolean;
+function guessCategory(statusName: string): StatusCategory {
+    const lower = statusName.toLowerCase();
+    if (['done', 'closed', 'resolved', 'released', 'shipped', 'cancelled'].some(s => lower.includes(s))) return 'done';
+    if (['in progress', 'review', 'qa', 'testing', 'verify', 'development'].some(s => lower.includes(s))) return 'started';
+    return 'not-started';
 }
 
 export default function App() {
   const [credentialsOpen, { open: openCredentials, close: closeCredentials }] = useDisclosure(false);
   const [statusManagerOpen, { open: openStatusManager, close: closeStatusManager }] = useDisclosure(false);
+  const [forecastModalOpen, { open: openForecastModal, close: closeForecastModal }] = useDisclosure(false);
   
   // Data State
   const [jql, setJql] = useState('project = "JIRA" AND sprint in openSprints()');
@@ -38,21 +43,93 @@ export default function App() {
   const [graphTitle, setGraphTitle] = useState('Burnup Chart');
   const [graphType, setGraphType] = useState('bar');
   
+  // Forecast Configuration
+  const [forecastConfig, setForecastConfig] = useState<ForecastConfig>({
+      enabled: false,
+      avgDatapoints: 3,
+      showConfidence: true,
+      mcCycles: 1000
+  });
+
   // Status State
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [statusConfigs, setStatusConfigs] = useState<StatusConfig[]>([]);
 
   // Derived State: Chart Data
-  const chartData = useMemo(() => {
+  const baseChartData = useMemo(() => {
     if (!dateRange[0] || !dateRange[1]) return [];
     
-    // Get enabled statuses in order
-    const enabledStatuses = statusConfigs.filter(s => s.enabled).map(s => s.name);
-    // If no configs yet (first load), use all available
-    const statusesToTrack = enabledStatuses.length > 0 ? enabledStatuses : availableStatuses;
+    // We want the chart data to contain values for ALL statuses, even disabled ones.
+    // This is crucial for forecasting, which needs to know the Total Scope (all work).
+    // The visualization logic filters what bars to draw based on 'statusConfigs',
+    // but the data points should be complete.
+    const statusesToTrack = availableStatuses;
 
     return processDailySnapshots(issues, dateRange[0], dateRange[1], metric || 'count', statusesToTrack);
-  }, [issues, dateRange, metric, statusConfigs, availableStatuses]);
+  }, [issues, dateRange, metric, availableStatuses]);
+
+  // Calculate Max Y for Chart Scaling (ignoring forecast) - memoized
+  const maxYValue = useMemo(() => {
+      let maxStack = 0;
+      if (!baseChartData || baseChartData.length === 0) return 'auto';
+      
+      baseChartData.forEach(d => {
+          let sum = 0;
+          statusConfigs.forEach(c => {
+              // Only sum enabled statuses
+              if (c.enabled && typeof d[c.name] === 'number') {
+                  sum += d[c.name];
+              }
+          });
+          if (sum > maxStack) maxStack = sum;
+      });
+      return maxStack > 0 ? Math.ceil(maxStack * 1.05) : 'auto'; // 5% padding
+  }, [baseChartData, statusConfigs]);
+
+  const forecastColor = useMemo(() => {
+      // "Lowest status on the Status configuration"
+      // Assuming statusConfigs is ordered top-down as listed in UI.
+      // The last element is the bottom one.
+      const enabled = statusConfigs.filter(s => s.enabled);
+      if (enabled.length > 0) {
+          return enabled[enabled.length - 1].color;
+      }
+      return '#ff7300';
+  }, [statusConfigs]);
+
+  // Combine Base Data with Forecast
+  const chartData = useMemo(() => {
+      // console.log(`Forecast Config: enabled=${forecastConfig.enabled}, dataLen=${baseChartData.length}`);
+      if (!forecastConfig.enabled || baseChartData.length === 0) return baseChartData;
+      
+      // Pass the end date of the chart's view. Forecast should NOT extend beyond this.
+      const endDateStr = dateRange[1] ? dateRange[1].toISOString().split('T')[0] : undefined;
+      const forecastResult = generateForecast(baseChartData, forecastConfig, statusConfigs, endDateStr);
+      // console.log('App: Forecast Result:', forecastResult);
+      
+      if (!forecastResult) return baseChartData;
+
+      const combined = [...baseChartData]; // Clone
+      
+      // Merge forecast points into the base data.
+      // Since 'generateForecast' now strictly respects the endDate, 
+      // the points generated should align perfectly with the placeholders already in baseChartData
+      // (which are generated by processDailySnapshots up to endDate).
+      // We should NOT push any new points that extend beyond the existing data array 
+      // if strictly adhering to "X-axis should not change".
+      
+      forecastResult.forecastPoints.forEach(pt => {
+          const index = combined.findIndex(d => d.date === pt.date);
+          if (index !== -1) {
+              // Merge into existing point 
+              combined[index] = { ...combined[index], ...pt };
+          } 
+          // Else: Ignore points outside the chart's date range (shouldn't happen with strict endDate logic)
+      });
+      
+      return combined;
+
+  }, [baseChartData, forecastConfig, statusConfigs, dateRange]);
 
   // Check credentials on mount
   useEffect(() => {
@@ -86,7 +163,8 @@ export default function App() {
                       newConfigs.push({
                           name: s,
                           color: `hsl(${Math.random() * 360}, 70%, 50%)`, // Random color for now
-                          enabled: true
+                          enabled: true,
+                          category: guessCategory(s)
                       });
                   }
               });
@@ -108,7 +186,8 @@ export default function App() {
           metric,
           statusConfigs,
           graphTitle,
-          graphType
+          graphType,
+          forecastConfig
       };
       
       try {
@@ -144,6 +223,7 @@ export default function App() {
                   if (config.statusConfigs) setStatusConfigs(config.statusConfigs);
                   if (config.graphTitle) setGraphTitle(config.graphTitle);
                   if (config.graphType) setGraphType(config.graphType);
+                  if (config.forecastConfig) setForecastConfig(config.forecastConfig);
 
                   if (config.jql) {
                       handleFetchData(config.jql);
@@ -158,9 +238,6 @@ export default function App() {
   };
 
   const metricLabel = METRICS.find(m => m.value === metric)?.label || metric;
-
-  const ChartComponent = graphType === 'area' ? AreaChart : BarChart;
-  const DataComponent = graphType === 'area' ? Area : Bar as any;
 
   return (
     <AppShell
@@ -187,6 +264,13 @@ export default function App() {
             statusConfigs={statusConfigs}
             onConfigsChange={setStatusConfigs}
         />
+        <ForecastModal
+            opened={forecastModalOpen}
+            onClose={closeForecastModal}
+            config={forecastConfig}
+            onSave={setForecastConfig}
+            key={forecastModalOpen ? 'open' : 'closed'}
+        />
         
         <Container fluid style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100%', paddingBottom: 0 }}>
             <Stack gap="sm" style={{ flex: 1, height: '100%' }}>
@@ -207,6 +291,7 @@ export default function App() {
                          <DatePickerInput
                             type="range"
                             label="Date Range"
+                            valueFormat="YYYY-MM-DD"
                             placeholder="Pick dates"
                             value={dateRange}
                             onChange={setDateRange}
@@ -231,16 +316,23 @@ export default function App() {
                                 ]}
                             />
                         </Stack>
-                         <Stack gap={0} style={{ flex: 1 }}>
-                            <Text size="sm" fw={500} mb={3}>Statuses</Text>
+                         <Stack gap={0}>
+                                <Button 
+                                    variant={forecastConfig.enabled ? "light" : "default"}
+                                    onClick={openForecastModal}
+                                    rightSection={<IconSettings size={14} />}
+                                >
+                                    Forecast
+                                </Button>
+                         </Stack>
+                         <Stack gap={0}>
                             <Button 
-                                variant="default" 
+                                variant="light" 
                                 onClick={openStatusManager} 
-                                justify="space-between" 
-                                rightSection={<Text size="xs" c="dimmed">{statusConfigs.filter(s => s.enabled).length} selected</Text>}
+                                rightSection={<IconSettings size={14} />}
                                 disabled={issues.length === 0}
                             >
-                                Configure Statuses & Colors
+                                Statuses
                             </Button>
                          </Stack>
                     </Group>
@@ -249,13 +341,7 @@ export default function App() {
 
                 <Paper p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
                     <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
-                         {/* Legend Placeholder if we move it out of Recharts, but Recharts legend is easier for interaction. 
-                             Using absolute positioning on the title input? No. 
-                             Let's try to put the Title and Legend in a row? 
-                             The Legend is part of the SVG. 
-                             Maybe we can just position the Recharts Legend better?
-                             If the title is textual above the chart, the legend should be to the right of the title?
-                          */}
+                         {/* Legend Placeholder */}
                     </div>
                     <TextInput 
                         variant="unstyled" 
@@ -269,49 +355,174 @@ export default function App() {
                     />
                     <div style={{ flex: 1, width: '100%', minHeight: 0, marginTop: 0 }}>
                         <ResponsiveContainer width="100%" height="100%">
-                            <ChartComponent
+                            <ComposedChart
                                 data={chartData}
                                 margin={{ top: 0, right: 30, left: 20, bottom: 5 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
-                                <XAxis dataKey="date" />
-                                <YAxis>
+                                <XAxis 
+                                    dataKey="date" 
+                                    interval="preserveStartEnd" // Attempt to show more ticks if possible, or control density
+                                    minTickGap={30} // Prevent overcrowding
+                                />
+                                <YAxis 
+                                    domain={[0, maxYValue]}
+                                    allowDataOverflow={true} 
+                                >
                                     <Label value={metricLabel || ''} angle={-90} position="insideLeft" style={{ textAnchor: 'middle' }} />
                                 </YAxis>
-                                <Tooltip cursor={{fill: 'transparent'}} />
-                                <Legend verticalAlign="top" align="right" wrapperStyle={{ top: -35, right: 10, lineHeight: '30px' }} />
+                                <Tooltip 
+                                    cursor={{fill: 'transparent'}} 
+                                    formatter={(value: any, name: any) => {
+                                        if (typeof value === 'number') {
+                                            // 2 Significant Figures logic:
+                                            // If >= 100, round to integer? No, 123 -> 120.
+                                            // User said: "Only use decimals if needed to show 2 significant figures"
+                                            // Maybe they meant "2 decimal places"? No, "significant figures".
+                                            // Let's try flexible formatting.
+                                            // Case: 1234.5 -> 1200 (2 sig figs) is aggressive. 
+                                            // Maybe they mean "Show 2 decimal places max, or 2 sig figs if small"?
+                                            // "Only use decimals if needed to show 2 significant figures." implies:
+                                            // 10 -> 10. (2 sig figs)
+                                            // 1 -> 1.0? (2 sig figs)
+                                            // 0.1 -> 0.10 (2 sig figs)
+                                            // 100 -> 100 ? (1 sig fig? or 3?)
+                                            // Let's stick to a cleaner heuristic:
+                                            // If val >= 10, no decimals (integer). 
+                                            // If val < 10, 1 decimal. 
+                                            // If val < 1, 2 decimals.
+                                            // Wait, "Only use decimals if needed to show 2 significant figures"
+                                            // Example: 85 (2 sig figs, no decimals). OK.
+                                            // Example: 5 (1 sig figs). To get 2: 5.0. 
+                                            
+                                            // Let's interpret "Reasonable number... Only use decimals if needed..." as:
+                                            // Clean integers if large. Max 2 decimal places if small.
+                                            return [
+                                                value >= 10 ? Math.round(value) : parseFloat(value.toPrecision(2)),
+                                                name
+                                            ];
+                                        }
+                                        return [value, name];
+                                    }}
+                                />
+                                <Legend 
+                                    verticalAlign="top" 
+                                    align="right" 
+                                    wrapperStyle={{ top: -35, right: 10, lineHeight: '30px' }} 
+                                    payload={
+                                        // Custom payload to exclude Forecast items or specific items
+                                        // We want historical items normally.
+                                        // Recharts doesn't make it easy to filter purely via prop.
+                                        // If we don't provide payload, it generates one.
+                                        // If we provide one, we must provide ALL.
+                                        // Use `content` prop or `filter` logic? No, `payload` overrides everything.
+                                        undefined // Revert to default, we handle hiding via 'legendType="none"' on Line
+                                    }
+                                />
                                 
-                                {/* Reverse the order when mapping to bars so the first item in the list (Top)
-                                    appears at the Top of the stack. Recharts stacks bottom-to-top by default.
-                                    For AreaChart, we might not want to reverse if it stacks differently, but usually it's compliant.
-                                */}
-                                {[...statusConfigs].reverse().filter(s => s.enabled).map((config) => (
-                                    <DataComponent 
-                                        key={config.name} 
-                                        dataKey={config.name} 
-                                        stackId="a" 
-                                        fill={config.color} 
-                                        stroke={config.color}
-                                        name={config.name}
-                                        type="linear"
-                                        dot={graphType === 'area' ? { fill: config.color, stroke: 'black', strokeWidth: 1, r: 4 } : false}
-                                    />
-                                ))}
-                                
-                                {/* Fallback if no configs but data (loading state or initial) */}
-                                {statusConfigs.length === 0 && availableStatuses.map((status, index) => (
-                                    <DataComponent 
-                                        key={status} 
-                                        dataKey={status} 
-                                        stackId="a" 
-                                        fill={`hsl(${index * 40}, 70%, 50%)`} 
-                                        stroke={`hsl(${index * 40}, 70%, 50%)`}
-                                        type="linear"
-                                        dot={graphType === 'area' ? { stroke: 'black', strokeWidth: 1, r: 4 } : false}
-                                    />
-                                ))}
+                                <defs>
+                                    {/* Pattern or gradients if needed */}
+                                </defs>
 
-                            </ChartComponent>
+                                {/* Historical Data - Stacked */}
+                                {[...statusConfigs].reverse().filter(s => s.enabled).map((config) => {
+                                    /* Use dynamic component based on graphType state */
+                                    const TagName = (graphType === 'area' ? Area : Bar) as any;
+                                    const props: any = {
+                                        key: config.name,
+                                        dataKey: config.name,
+                                        stackId: "a",
+                                        fill: config.color,
+                                        stroke: config.color,
+                                        name: config.name,
+                                        type: "linear"
+                                    };
+                                    if (graphType === 'area') {
+                                        props.dot = { fill: config.color, stroke: 'black', strokeWidth: 1, r: 4 };
+                                    }
+                                    return <TagName {...props} />;
+                                })}
+                                
+                                {/* Fallback when issues not loaded yet */}
+                                {statusConfigs.length === 0 && availableStatuses.map((status, index) => {
+                                     const TagName = (graphType === 'area' ? Area : Bar) as any;
+                                     return (
+                                        <TagName 
+                                            key={status} 
+                                            dataKey={status} 
+                                            stackId="a" 
+                                            fill={`hsl(${index * 40}, 70%, 50%)`} 
+                                            stroke={`hsl(${index * 40}, 70%, 50%)`}
+                                            type="linear"
+                                        />
+                                     );
+                                })}
+
+                                {/* Forecast Lines */}
+                                {forecastConfig.enabled && (
+                                    <>
+                                        {/* Linear Forecast */}
+                                        <Line 
+                                            type="linear" 
+                                            dataKey="Forecast" 
+                                            stroke={forecastColor} 
+                                            strokeDasharray="5 5" 
+                                            dot={false}
+                                            activeDot={{ r: 8 }} 
+                                            name="Projected Completion"
+                                            strokeWidth={2}
+                                            isAnimationActive={false}
+                                            connectNulls={true}
+                                            legendType="none"
+                                        />
+                                        
+                                        {/* Total Scope Line */}
+                                        <Line 
+                                            type="linear"
+                                            dataKey="TotalScopeProjected"
+                                            stroke={statusConfigs.find(s => s.category === 'not-started')?.color || '#888'}
+                                            strokeDasharray="3 3"
+                                            dot={false}
+                                            name="Total Scope"
+                                            strokeWidth={2}
+                                            isAnimationActive={false}
+                                            connectNulls={true}
+                                            legendType="none"
+                                        />
+                                        
+                                        {/* Confidence Intervals */}
+                                        {forecastConfig.showConfidence && (
+                                            <>
+                                                <Line 
+                                                    type="linear" 
+                                                    dataKey="ConfidenceHigh" 
+                                                    stroke={forecastColor} 
+                                                    strokeDasharray="2 2" 
+                                                    dot={false} 
+                                                    strokeOpacity={0.5}
+                                                    name="95% High"
+                                                    isAnimationActive={false}
+                                                    connectNulls={true}
+                                                    legendType="none"
+                                                />
+                                                <Line 
+                                                    type="linear" 
+                                                    dataKey="ConfidenceLow" 
+                                                    stroke={forecastColor} 
+                                                    strokeDasharray="2 2" 
+                                                    dot={false} 
+                                                    strokeOpacity={0.5}
+                                                    name="95% Low"
+                                                    isAnimationActive={false}
+                                                    connectNulls={true}
+                                                    legendType="none"
+                                                />
+                                            </>
+                                        )}
+                                    </>
+                                )}
+
+                            </ComposedChart>
                         </ResponsiveContainer>
                     </div>
                 </Paper>

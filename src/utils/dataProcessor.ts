@@ -7,26 +7,7 @@ dayjs.extend(timezone);
 
 const PT_TIMEZONE = "America/Los_Angeles";
 
-export interface Issue {
-    key: string;
-    fields: {
-        created: string;
-        status: { name: string };
-        [key: string]: any;
-    };
-    changelog?: {
-        histories: {
-            created: string;
-            items: {
-                field: string;
-                fromString: string;
-                toString: string;
-                from: string;
-                to: string;
-            }[];
-        }[];
-    };
-}
+import { Issue } from '../types';
 
 export function extractAllStatuses(issues: Issue[]): string[] {
     const statuses = new Set<string>();

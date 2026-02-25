@@ -1,5 +1,6 @@
 import { describe, it, expect } from 'vitest';
-import { processDailySnapshots, Issue } from './dataProcessor';
+import { processDailySnapshots } from './dataProcessor';
+import { Issue } from '../types';
 
 describe('processDailySnapshots', () => {
     it('should correctly snapshot status history', () => {
