@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Button, Group, Text, ColorInput, Paper, Stack, Title } from '@mantine/core';
+import { Modal, Button, Group, Text, Paper, Stack, Title, Popover, ColorSwatch, ColorPicker } from '@mantine/core';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { IconGripVertical } from '@tabler/icons-react';
 import { StatusConfig, StatusCategory } from '../types';
@@ -188,27 +188,23 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
                                                                 >
                                                                     {config.enabled ? "On" : "Off"}
                                                                 </Button>
-
-                                                                <ColorInput
-                                                                    value={config.color}
-                                                                    onChange={(c) => updateColor(config.name, c)}
-                                                                    size="xs"
-                                                                    w={30}
-                                                                    withEyeDropper={false}
-                                                                    styles={{ 
-                                                                        input: { 
-                                                                            width: 30, 
-                                                                            padding: 0, 
-                                                                            color: 'transparent', 
-                                                                            cursor: 'pointer',
-                                                                            fontSize: 0 // Ensure no text rendering artifacts
-                                                                        },
-                                                                        wrapper: {
-                                                                            width: 30
-                                                                        }
-                                                                    }}
-                                                                    disabled={!config.enabled}
-                                                                />
+                                                                
+                                                                <Popover position="bottom-end" shadow="md">
+                                                                    <Popover.Target>
+                                                                        <ColorSwatch 
+                                                                            color={config.color} 
+                                                                            size={30}
+                                                                            component="button"
+                                                                            style={{ cursor: 'pointer', border: '1px solid #ddd' }}
+                                                                        />
+                                                                    </Popover.Target>
+                                                                    <Popover.Dropdown>
+                                                                        <ColorPicker
+                                                                            value={config.color}
+                                                                            onChange={(c) => updateColor(config.name, c)}
+                                                                        />
+                                                                    </Popover.Dropdown>
+                                                                </Popover>
                                                             </Group>
                                                         </Paper>
                                                     )}

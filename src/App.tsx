@@ -1,5 +1,5 @@
-import { useState, useEffect, useMemo } from 'react';
-import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, SegmentedControl } from '@mantine/core';
+import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
+import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, SegmentedControl, ActionIcon } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import { CredentialsModal } from './components/CredentialsModal';
@@ -9,7 +9,8 @@ import { Area, Bar, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, L
 import { extractAllStatuses, processDailySnapshots } from './utils/dataProcessor';
 import { generateForecast } from './utils/forecasting';
 import { Issue, StatusConfig, StatusCategory, ForecastConfig } from './types';
-import { IconDeviceFloppy, IconFolderOpen, IconSettings } from '@tabler/icons-react';
+import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload } from '@tabler/icons-react';
+import { toPng } from 'html-to-image';
 
 import '@mantine/dates/styles.css';
 
@@ -42,6 +43,8 @@ export default function App() {
   const [metric, setMetric] = useState<string | null>('customfield_10006');
   const [graphTitle, setGraphTitle] = useState('Burnup Chart');
   const [graphType, setGraphType] = useState('bar');
+  const [isEditingTitle, setIsEditingTitle] = useState(false);
+  const chartRef = useRef<HTMLDivElement>(null);
   
   // Forecast Configuration
   const [forecastConfig, setForecastConfig] = useState<ForecastConfig>({
@@ -236,6 +239,33 @@ export default function App() {
       };
       input.click();
   };
+  
+  const handleDownload = useCallback(() => {
+      if (!chartRef.current) return;
+      
+      const filter = (node: HTMLElement) => {
+           // Exclude elements with class 'no-capture'
+           if (node.classList && node.classList.contains('no-capture')) {
+               return false;
+           }
+           return true;
+      };
+
+      toPng(chartRef.current, { cacheBust: true, backgroundColor: '#ffffff', filter })
+          .then((dataUrl) => {
+              const link = document.createElement('a');
+              const now = new Date();
+              const dateString = now.toLocaleDateString('en-CA'); // YYYY-MM-DD
+              const timeString = now.toLocaleTimeString('en-GB', { hour12: false }).replace(/:/g, '-'); // HH-MM-SS
+              
+              link.download = `${graphTitle.replace(/[^a-z0-9]/gi, '_').toLowerCase()}_${dateString}_${timeString}.png`;
+              link.href = dataUrl;
+              link.click();
+          })
+          .catch((err) => {
+              console.error("Failed to download chart image", err);
+          });
+  }, [graphTitle]);
 
   const metricLabel = METRICS.find(m => m.value === metric)?.label || metric;
 
@@ -339,25 +369,54 @@ export default function App() {
                 </Paper>
 
 
-                <Paper p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative' }}>
-                    <div style={{ position: 'absolute', top: 10, right: 10, zIndex: 10 }}>
-                         {/* Legend Placeholder */}
+                <Paper ref={chartRef} p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+                    
+                    {/* Header: Download + Title */}
+                    <div style={{ position: 'relative', height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px' }}>
+                        
+                        <div className="no-capture" style={{ position: 'absolute', left: 10, top: 10, zIndex: 20 }}>
+                            <ActionIcon onClick={handleDownload} title="Download Chart Image" variant="subtle" color="gray" size="lg">
+                                <IconDownload size={20} />
+                            </ActionIcon>
+                        </div>
+
+                        {/* Centered Title */}
+                        <div style={{ zIndex: 10 }}>
+                            {isEditingTitle ? (
+                                <TextInput
+                                    value={graphTitle}
+                                    onChange={(e) => setGraphTitle(e.currentTarget.value)}
+                                    onBlur={() => setIsEditingTitle(false)}
+                                    // Submit on Enter
+                                    onKeyDown={(e) => { if (e.key === 'Enter') setIsEditingTitle(false); }}
+                                    autoFocus
+                                    styles={{ input: { textAlign: 'center', fontWeight: 700, width: 300 } }}
+                                />
+                            ) : (
+                                <Paper 
+                                    withBorder 
+                                    p="xs" 
+                                    onClick={() => setIsEditingTitle(true)}
+                                    style={{ cursor: 'text', minWidth: 200, display: 'flex', justifyContent: 'center', backgroundColor: 'transparent' }}
+                                >
+                                     <Text fw={700} size="md">{graphTitle}</Text>
+                                </Paper>
+                            )}
+                        </div>
+
+                        {/* Legend Placeholder */}
+                         <div style={{ position: 'absolute', right: 10, top: 10, zIndex: 10 }}>
+                             {/* Recharts Legend renders here via portal or absolute positioning if we wanted, 
+                                 but currently it renders inside ResponsiveContainer. 
+                                 We leave this space empty or for future controls. */}
+                        </div>
                     </div>
-                    <TextInput 
-                        variant="unstyled" 
-                        size="sm"
-                        value={graphTitle} 
-                        onChange={(e) => setGraphTitle(e.currentTarget.value)}
-                        styles={{ 
-                            input: { fontWeight: 700, textAlign: 'center', height: 30, minHeight: 30, marginTop: 5 }, 
-                            root: { marginBottom: 0 } 
-                        }}
-                    />
+                    
                     <div style={{ flex: 1, width: '100%', minHeight: 0, marginTop: 0 }}>
                         <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart
                                 data={chartData}
-                                margin={{ top: 0, right: 30, left: 20, bottom: 5 }}
+                                margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis 
@@ -408,7 +467,7 @@ export default function App() {
                                 <Legend 
                                     verticalAlign="top" 
                                     align="right" 
-                                    wrapperStyle={{ top: -35, right: 10, lineHeight: '30px' }} 
+                                    wrapperStyle={{ top: 0, right: 10, lineHeight: '30px' }} 
                                     payload={
                                         // Custom payload to exclude Forecast items or specific items
                                         // We want historical items normally.
