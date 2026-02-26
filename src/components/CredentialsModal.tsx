@@ -4,11 +4,11 @@ import { useState } from 'react';
 interface CredentialsModalProps {
     opened: boolean;
     onClose: () => void;
+    canClose: boolean; // If false, hide close button and prevent closing without success
 }
 
-export function CredentialsModal({ opened, onClose }: CredentialsModalProps) {
+export function CredentialsModal({ opened, onClose, canClose }: CredentialsModalProps) {
     const [host, setHost] = useState('');
-    const [email, setEmail] = useState('');
     const [apiToken, setApiToken] = useState('');
     const [error, setError] = useState<string | null>(null);
     const [saving, setSaving] = useState(false);
@@ -21,18 +21,18 @@ export function CredentialsModal({ opened, onClose }: CredentialsModalProps) {
         try {
             // Simple validation
             if (!host || !apiToken) {
-                setError("Host and API Token are required.");
+                setError("All fields are required.");
                 setSaving(false);
                 return;
             }
 
-            // Save credentials via Electron IPC
-            const result = await window.ipcRenderer.invoke('save-credentials', { host, email, apiToken });
+            // @ts-ignore
+            const result = await window.ipcRenderer.invoke('save-credentials', { host, apiToken });
             
-            if (result) {
+            if (result.success) {
                 onClose();
             } else {
-                setError("Failed to save credentials");
+                setError(result.error || "Failed to save credentials");
             }
         } catch (err: any) {
             setError(err.message || "An unexpected error occurred");
@@ -44,37 +44,30 @@ export function CredentialsModal({ opened, onClose }: CredentialsModalProps) {
     return (
         <Modal 
             opened={opened} 
-            onClose={onClose} 
+            onClose={() => canClose && onClose()} 
             title="Setup Jira Access" 
-            withCloseButton={false} 
-            closeOnClickOutside={false}
-            closeOnEscape={false}
+            withCloseButton={canClose} 
+            closeOnClickOutside={canClose}
+            closeOnEscape={canClose}
         >
             <form onSubmit={handleSubmit}>
                 <Stack>
                     <Text size="sm" c="dimmed">
-                        Enter your Jira credentials.
+                        Enter your Jira Datacenter credentials.
                     </Text>
                     
                     {error && <Alert color="red" variant="light">{error}</Alert>}
                     
                     <TextInput 
                         label="Jira Host" 
-                        placeholder="jira.company.com" 
+                        placeholder="jira.companyname.com:8443" 
                         value={host}
                         onChange={(event) => setHost(event.currentTarget.value)}
                         required
                     />
-
-                    <TextInput 
-                        label="Email (Optional for PAT)" 
-                        placeholder="you@company.com" 
-                        value={email}
-                        onChange={(event) => setEmail(event.currentTarget.value)}
-                    />
                     
                     <PasswordInput 
-                        label="API Token / Password" 
+                        label="Personal Access Token" 
                         placeholder="Paste token here" 
                         value={apiToken}
                         onChange={(event) => setApiToken(event.currentTarget.value)}
@@ -82,8 +75,19 @@ export function CredentialsModal({ opened, onClose }: CredentialsModalProps) {
                     />
                     
                     <Group justify="flex-end" mt="md">
+                        {canClose && <Button variant="default" onClick={onClose}>Cancel</Button>}
                         <Button type="submit" loading={saving}>Save Credentials</Button>
                     </Group>
+
+                    <Text size="xs" mt="md">
+                        <b>How to get your Jira access token (Jira Datacenter):</b><br/>
+                        1. Go to Jira<br/>
+                        2. In the upper-right, click on your user icon --&gt; Profile<br/>
+                        3. Personal Access Token --&gt; Create token<br/>
+                        4. Give the token any name, like "for Cycle Time app". Expiry date is optional<br/>
+                        5. Click "Create"<br/>
+                        6. Copy and paste the code it gives to into this app
+                    </Text>
                 </Stack>
             </form>
         </Modal>

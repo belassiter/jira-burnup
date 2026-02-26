@@ -45,11 +45,26 @@ export function ForecastModal({ opened, onClose, config, onSave }: ForecastModal
                         {localConfig.showConfidence && (
                             <NumberInput
                                 label="Monte Carlo Cycles"
-                                description="Number of simulations to run (default 1000)"
+                                description="Runs - Use ↑/↓ for x10/÷10"
                                 min={100}
-                                step={100}
+                                max={100000}
+                                step={1000}
                                 value={localConfig.mcCycles}
                                 onChange={(val) => setLocalConfig({ ...localConfig, mcCycles: Number(val) })}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'ArrowUp') {
+                                        e.preventDefault();
+                                        const current = Number(localConfig.mcCycles) || 1000;
+                                        const next = current * 10;
+                                        setLocalConfig({ ...localConfig, mcCycles: next > 100000 ? 100000 : next });
+                                    }
+                                    if (e.key === 'ArrowDown') {
+                                        e.preventDefault();
+                                        const current = Number(localConfig.mcCycles) || 1000;
+                                        const next = current / 10;
+                                        setLocalConfig({ ...localConfig, mcCycles: next < 100 ? 100 : Math.floor(next) });
+                                    }
+                                }}
                             />
                         )}
                     </>

@@ -10,7 +10,8 @@
     "preview": "vite preview",
     "lint": "eslint . --max-warnings 0",
     "test": "vitest run",
-    "verify": "npm run lint && npm run test && npm run build"
+    "verify": "npm run lint && npm run test && npm run build",
+    "pack:simple": "tsc && vite build && electron-packager . JiraBurnupChart --platform=win32 --arch=x64 --out=release-simple --overwrite --ignore=\"^/src\" --ignore=\"^/.git\" --ignore=\"^/node_modules/electron\""
   },
   "dependencies": {
     "@emotion/react": "^11.11.1",
@@ -41,6 +42,7 @@
     "@vitejs/plugin-react": "^5.1.4",
     "electron": "^40.6.0",
     "electron-builder": "^26.8.1",
+    "electron-packager": "^17.1.2",
     "eslint": "^9.39.3",
     "eslint-plugin-react-hooks": "^7.0.1",
     "eslint-plugin-react-refresh": "^0.5.2",

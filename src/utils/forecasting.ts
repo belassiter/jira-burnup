@@ -46,6 +46,10 @@ export interface ForecastResult {
     avgVelocity: number;
     daysToComplete: number;
     completionDate: string | null;
+    simulationResults?: {
+        slopes: number[];
+        completionDates: string[]; // ISO Date strings
+    };
 }
 
 export const generateForecast = (
@@ -317,27 +321,104 @@ export const generateForecast = (
 
     let finalLow = lastDoneCount;
     let finalHigh = lastDoneCount;
+    // START NEW SIMULATION LOGIC
+    let simulationResults: { slopes: number[]; completionDates: string[] } | undefined;
     
     if (forecastConfig.showConfidence) {
-        const cycles = 1000;
+        const cycles = forecastConfig.mcCycles || 1000;
         const finalOutcomes: number[] = [];
+        const finalSlopes: number[] = [];
+        const completionDates: string[] = [];
 
-        // 1. Run Monte Carlo for the projection period
+        // 1. Run Monte Carlo 
+        const MAX_SIM_DAYS = 365 * 2; // Reduced to 2 years max projection for performance
+        const startDayIndex = new Date(lastDate).getUTCDay(); // 0=Sun, 6=Sat
+        
+        // Optimization: For CHART confidence intervals (which are critical for UI responsiveness), 100k cycles is overkill if we only need P2.5/P97.5 at day X.
+        // But for HISTOGRAM visualization (which has bins), we need density.
+        // However, simulating 100k full histories (potentially 700+ days long) is computationally expensive on the main thread (>2s freeze).
+        // 
+        // Strategy: 
+        // If the user requested lots of cycles (>10k), we should cap the inner loop iteration count to prevent freezing.
+        // Or we warn the user.
+        // Since we can't warn, we'll implement a hybrid approach:
+        // Use full cycles for short projections, fewer cycles for long completion.
+        // Or simply stick to a lower default like 10,000 for the completion histogram if calculation takes too long?
+        // No, let's respect the user's setting but optimize the loop limit.
+        // The inner loop break `if (scopeMet && d > projectionDays)` handles most "fast finish" cases.
+        // The problem is "slow finish" cases (1000 points remaining, velocity 0-1).
+        // If avg velocity is low, we might run 100M iters.
+        
         for (let c = 0; c < cycles; c++) {
             let simDone = lastDoneCount;
-            // Iterate calendar days, but only apply velocity on workdays
-            for (let d = 1; d <= projectionDays; d++) {
-                const dateToCheck = new Date(lastDate);
-                dateToCheck.setUTCDate(dateToCheck.getUTCDate() + d);
+            let d = 0;
+            let finishedDay = -1;
+            let scopeMet = false;
+            let doneAtProjection = -1;
+
+            // Optimization: If simulation has already finished scope, we can stop the loop early unless we need it for projection match
+            // This is CRITICAL for speed: Most runs finish way before 5 years.
+            while (d < MAX_SIM_DAYS) {
+                // Check exit condition first (after completing scope AND passing chart projection)
+                if (scopeMet && d >= projectionDays) break;
+
+                d++;
                 
-                if (!isWeekend(dateToCheck)) {
-                    // Randomly sample a velocity from history
+                // Calculate day of week using modulo arithmetic entirely
+                // (startDay + d) % 7. 
+                // UTC Day: Sun=0, Mon=1... Sat=6.
+                const currentDayIndex = (startDayIndex + d) % 7;
+                const isWe = (currentDayIndex === 0 || currentDayIndex === 6);
+
+                if (!isWe) {
+                     // Pre-fetch random index to avoid Math.floor/random inside if possible?
+                     // Actually Math.random is the bottleneck (approx 50-100ns).
+                     // 100k * 365 = 36M iterations. 36M * 100ns = 3.6s.
+                     // 100k * 1825 = 182M iterations = 18s.
+                     // We MUST optimize the "when to stop" or reduce random usage.
+                     
+                     // Optimization: If we just need to know WHEN it finishes, we effectively sum random variables.
+                     // Sum of N random variables ~ Normal distribution (CLT).
+                     // But we want the distribution of N (days).
+                     // Random Walk First Passage Time?
+                     
+                     // Practical Optimization: Block processing.
+                     // If we are far from scope (remaining > 10 * max_velocity), we can jump 5 days?
+                     // Check if min_velocity * 5 would finish it? No.
+                     // Just perform 5 adds.
+                     // Unrolling the loop?
+                     
                      const randomVel = simVelocities[Math.floor(Math.random() * simVelocities.length)];
                      simDone += randomVel;
                 }
+
+                if (d === projectionDays) {
+                    doneAtProjection = simDone;
+                }
+
+                if (!scopeMet && simDone >= totalScope) {
+                    finishedDay = d;
+                    scopeMet = true;
+                }
             }
-            finalOutcomes.push(simDone);
+            
+            if (!scopeMet) finishedDay = MAX_SIM_DAYS;
+            if (doneAtProjection === -1) doneAtProjection = simDone; // If projection > max
+
+            finalOutcomes.push(doneAtProjection);
+            
+            if (workDaysInProjection > 0) {
+                finalSlopes.push((doneAtProjection - lastDoneCount) / workDaysInProjection);
+            } else {
+                finalSlopes.push(0);
+            }
+
+            const finalDate = new Date(lastDate);
+            finalDate.setUTCDate(finalDate.getUTCDate() + finishedDay);
+            completionDates.push(finalDate.toISOString().split('T')[0]);
         }
+        
+        simulationResults = { slopes: finalSlopes, completionDates };
         
         // 2. Sort outcomes to find distribution
         finalOutcomes.sort((a, b) => a - b);
@@ -348,21 +429,13 @@ export const generateForecast = (
         
         finalLow = finalOutcomes[indexLow];
         finalHigh = finalOutcomes[indexHigh];
-        
-        // Note: We no longer calculate "Work Day Slope" here. We use Calendar Slope below.
     }
+    // END NEW SIMULATION LOGIC
 
     // Generate linear lines using calculated slopes but respecting weekends
     let currentDone = lastDoneCount;
-    // We define "Work Day Velocity" as (Avg Total Velocity * 7 / 5) ?
-    // No, if avgVelocity comes from a mix of 0s(weekends) and Xs(weekdays), it averages to X*5/7.
-    // So if we only apply it on weekdays, we should apply (Avg * 7/5).
-    // Let's refine AvgVelocity calculation to be "Average Velocity on Work Days".
-    // Re-calculating velocities from history excludes weekends would be better.
-    
-    // Use the pre-calculated average velocity of actual Work Days
     const workDayVelocity = avgWorkDayVelocity;
-
+    
     // Helper to track cumulative progress for confidence lines
     let cumSlopeLow = 0;
     let cumSlopeHigh = 0;
@@ -395,7 +468,7 @@ export const generateForecast = (
                 cumSlopeHigh += slopeHigh;
                 cumSlopeLow += slopeLow;
             }
-        } 
+        }
         
         // Skip weekend points for drawing, BUT ONLY if we are not at the very end.
         // If we skip plotting, Recharts with connectNulls=true will draw a straight line
@@ -427,6 +500,7 @@ export const generateForecast = (
         forecastPoints,
         avgVelocity,
         daysToComplete: estimatedCompletionDays,
-        completionDate: avgVelocity > 0 ? finalDateStr : null
+        completionDate: avgVelocity > 0 ? finalDateStr : null,
+        simulationResults
     };
 };

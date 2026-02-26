@@ -73,11 +73,16 @@ ipcMain.handle('has-credentials', async () => {
 ipcMain.handle('save-credentials', async (_event, secrets: JiraSecrets) => {
   try {
     const userDataPath = path.join(app.getPath('userData'), 'jira-secrets.json');
+    // Basic validation
+    if (!secrets.host || !secrets.apiToken) {
+       return { success: false, error: "Host and API Token are required" };
+    }
     fs.writeFileSync(userDataPath, JSON.stringify(secrets));
-    return true;
-  } catch (e) {
+    
+    return { success: true };
+  } catch (e: any) {
     console.error(e);
-    return false;
+    return { success: false, error: e.message || 'Failed to save credentials' };
   }
 });
 

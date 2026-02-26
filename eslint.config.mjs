@@ -5,7 +5,7 @@ import pluginReactHooks from 'eslint-plugin-react-hooks';
 import pluginReactRefresh from 'eslint-plugin-react-refresh';
 
 export default tseslint.config(
-  { ignores: ['dist', 'dist-electron', 'node_modules', 'example'] },
+  { ignores: ['dist', 'dist-electron', 'node_modules', 'example', 'release', 'release-simple'] },
   {
     extends: [pluginJs.configs.recommended, ...tseslint.configs.recommended],
     files: ['**/*.{js,mjs,cjs,ts,jsx,tsx}'],
