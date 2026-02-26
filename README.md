@@ -5,7 +5,7 @@ A simple app to visualize burnup charts for Jira. The user specifies a JQL query
 
 ### Instructions: Packaged version (no dependencies)
 Want to use this app without having a dev environment setup? Follow this simple steps
-1. Download the lateest Windows executable zip file, unzip it to a folder
+1. Download the lateest Windows executable zip file from [text](https://tandemdiabetesinc.sharepoint.com/sites/ProductExecution/Shared%20Documents/Forms/AllItems.aspx?id=%2Fsites%2FProductExecution%2FShared%20Documents%2FScrum%20Master%20Materials%2FJira%20Tools%20%28Brian%27s%29&viewid=ec65a3f6%2D7489%2D4b1f%2Da5b7%2Df34e18716418&FolderCTID=0x012000F1A81495343D1F4B9B577C29B54FAFB5), unzip it to a folder
 1. Run JiraBurnupChart.exe
 1. If this is your first time, it will ask for you to input credentials
 1. Have at it!
