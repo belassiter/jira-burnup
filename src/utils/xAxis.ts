@@ -10,6 +10,7 @@ import {
 
 const SHORT_RANGE_DAY_MODE_MAX_DAYS = 21;
 const TARGET_WEEK_TICKS = 8;
+const MAX_DAILY_TICKS = 9;
 
 export function getXAxisTicks(
     availableDates: string[],
@@ -29,7 +30,21 @@ export function getXAxisTicks(
 
     // Short range: show individual days (already weekday-quantized by data source)
     if (totalDays <= SHORT_RANGE_DAY_MODE_MAX_DAYS) {
-        return sortedDates;
+        if (sortedDates.length <= MAX_DAILY_TICKS) {
+            return sortedDates;
+        }
+
+        // Keep start/end, sample interior dates to avoid overlap in medium-short ranges
+        const sampled = new Set<string>();
+        sampled.add(sortedDates[0]);
+
+        const step = Math.ceil((sortedDates.length - 1) / (MAX_DAILY_TICKS - 1));
+        for (let i = step; i < sortedDates.length - 1; i += step) {
+            sampled.add(sortedDates[i]);
+        }
+
+        sampled.add(sortedDates[sortedDates.length - 1]);
+        return Array.from(sampled).sort();
     }
 
     // Long range: start + Monday ticks at fixed integer week increments + end

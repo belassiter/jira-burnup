@@ -52,4 +52,17 @@ describe('xAxis ticks', () => {
             expect(endGap).toBeGreaterThanOrEqual(Math.max(5, Math.round(stepDays * 0.6)));
         }
     });
+
+    it('downsamples short-range daily ticks when weekday count is high', () => {
+        // 13 weekdays from 2026-03-02 to 2026-03-18
+        const start = '2026-03-02';
+        const end = '2026-03-18';
+        const available = buildWeekdayDateStrings(start, end);
+        const ticks = getXAxisTicks(available, parseISO(start), parseISO(end));
+
+        expect(available.length).toBe(13);
+        expect(ticks[0]).toBe(start);
+        expect(ticks[ticks.length - 1]).toBe(end);
+        expect(ticks.length).toBeLessThan(available.length);
+    });
 });

@@ -279,3 +279,30 @@ Summary:
 - Result: the plot domain now stays aligned with the actual date range, while the last date label has extra right-side room and does not clip.
 - Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
 
+
+## 3/11/2026 10:55 AM PT
+User: I'm seeing a case that covers 13 weekdays, and it's trying to display x-axis labels daily, and it's very overlapping.
+
+Summary:
+- Updated [src/utils/xAxis.ts](src/utils/xAxis.ts) short-range behavior:
+    - Kept day-based mode for short ranges, but added a density cap (`MAX_DAILY_TICKS = 9`).
+    - When short-range weekday count exceeds the cap (e.g., 13 weekdays), ticks are now downsampled while preserving first and last dates.
+- Added regression coverage in [src/utils/xAxis.test.ts](src/utils/xAxis.test.ts):
+    - New test validates that a 13-weekday range no longer renders every daily label and still includes start/end.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+
+
+## 3/11/2026 11:00 AM PT
+User: Also, y-axis first label should always be zero. Also, it should be smarter about the increments. I see it has an increment of 700, that's not really what people expect. Use standard behavior.
+
+Summary:
+- Reworked [src/utils/chartAxis.ts](src/utils/chartAxis.ts):
+    - Replaced fixed-step behavior with a standard “nice number” tick algorithm (1/2/5 × powers of 10).
+    - Ensured Y-axis ticks always start with `0` as the first label.
+    - Updated rounded max calculation to align with the selected nice step.
+- Updated tests in [src/utils/chartAxis.test.ts](src/utils/chartAxis.test.ts):
+    - Kept expected behavior for 182 → `[0, 50, 100, 150, 200]`.
+    - Added coverage to ensure awkward increments like `700` are avoided in favor of standard increments.
+    - Added/updated safety checks for invalid/empty input.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+
