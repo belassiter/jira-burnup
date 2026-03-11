@@ -21,17 +21,10 @@ const calculateTotalScope = (point: ChartPoint, statusConfigs: StatusConfig[]): 
     let total = 0;
     const scopes: string[] = [];
     for (const config of statusConfigs) {
-        // IMPORTANT: We include DISABLED statuses in the scope calculation.
-        // Users often disable statuses like 'In Progress' or 'Todo' to declutter the chart view,
-        // but they still represent work that needs to be done.
-        // Excluding them would make remainingScope = 0 prematurely.
-        
+        if (!config.enabled) continue;
+
         const val = point[config.name];
-        
-        // If the value is missing from the point (because processDailySnapshots didn't include it?), we assume 0.
-        // But processDailySnapshots usually includes all statuses found in issues.
-        // If config.name is valid, point[config.name] should be there.
-        
+
         if (typeof val === 'number') {
             total += val;
             if (val > 0) scopes.push(`${config.name}=${val}`);

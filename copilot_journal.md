@@ -306,3 +306,44 @@ Summary:
     - Added/updated safety checks for invalid/empty input.
 - Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
 
+
+
+## 2026-03-11 11:28:15
+
+**Prompt:**
+Examine the `src/components/StatusManager.tsx` file for the following fixes:
+1. Provide a button to set all statuses in a group to a certain color. "Set to Red" for "Not Started", "Set to Gold" for "Started" (darker gold), and "Set to Green" for "Done" (darker green).
+2. When the modal is closed via onClose (e.g. clicking the X or background), we need to warn the user if `localConfigs` differs from `statusConfigs` and ask "Are you sure you want to lose these changes?". If the user clicks Save, we save. If they click Cancel, we discard, but maybe warning them with `window.confirm`.
+3. The user reported that when dragging a status, it "shows up far away from where I'm dragging". This is a common bug with `@hello-pangea/dnd` where a `style={provided.draggableProps.style}` might be applied to a component that uses css transforms, or there's a missing ref. Find the dragging code and identify the bug.
+Read the file and return the code replacements.
+
+**Changes:**
+- Modified StatusManager.tsx to add setGroupColor function and a Button to each Droppable column to set all items within that status group to either red, gold, or green.
+- Added initialConfigs state initialized during modal open to track changes. If handleClose calculates that localConfigs varies from initialConfigs, a window.confirm dialog is displayed.
+- Refactored Draggable block: Wrapped the Paper node inside a vanilla div block to receive the injected DND refs and styles, avoiding transform conflicts with Mantine components that caused the dragged status item bug.
+
+**Architecture/Design changes:**
+- None
+
+ # #   2 0 2 6 - 0 3 - 1 1 :   S t a t u s   M a n a g e r   E n h a n c e m e n t s 
+ * * P r o m p t : * * 
+ L e t ' s   m a k e   s t a t u s   m a n a g e m e n t   e a s i e r .   1 .   T o   t h e   r i g h t   o f   " N O T   S T A R T E D " ,   I   w a n t   a   b u t t o n   " S e t   t o   R e d "   [ e t c . ] 
+ * * C h a n g e s : * * 
+ *   A d d e d   s e t G r o u p C o l o r   i n   S t a t u s M a n a g e r . t s x   t o   m a s s - a s s i g n   c o l o r s   b y   s t a t u s   c a t e g o r y   ( R e d / G o l d / G r e e n   f o r   N o t   S t a r t e d / S t a r t e d / D o n e ) . 
+ *   I m p l e m e n t e d   d i r t y - s t a t e   t r a c k i n g   u s i n g   i n i t i a l C o n f i g s   c o m p a r i s o n ;   i n t e r c e p t i n g   o n C l o s e   c a l l s   w i t h   a   c o n f i r m   d i a l o g   t o   p r e v e n t   a c c i d e n t a l   d a t a   l o s s . 
+ *   F i x e d   a   @ h e l l o - p a n g e a / d n d   t r a n s f o r m   c o o r d i n a t e   b u g   u s i n g   M a n t i n e ' s   < P o r t a l >   w r a p p e r   c o n d i t i o n a l l y   a r o u n d   < D r a g g a b l e >   c o m p o n e n t s   o n l y   w h i l e   s n a p s h o t . i s D r a g g i n g   i s   t r u e .   
+ *   V e r i f i e d   l i n t i n g ,   u n i t   t e s t s   ( 1 5 3   p a s s e d ) ,   a n d   p r o d u c t i o n   b u i l d . 
+  
+ 
+ # #   2 0 2 6 - 0 3 - 1 1 :   T o t a l   S c o p e   &   C h a r t   D i s p l a y   M o d e   U p d a t e 
+ * * P r o m p t : * * 
+ 1 .   M a k e   s u r e   t h e   T o t a l   S c o p e   c a l c u l a t i o n   t a k e s   i n t o   a c c o u n t   d i s a b l e d   s t a t u s e s . 
+ 2 .   I n   t h e   S t a t u s   m o d a l ,   i n   t h e   h e a d e r ,   r i g h t   j u s t i f i e d ,   I   w a n t   a   t o g g l e .   T h e   l e f t   s i d e   o f   t h e   t o g g l e   i s   ' A l l   s t a t u s e s ' .   T h e   r i g h t   s i d e   i s   ' C a t e g o r i e s   o n l y ' .   T o   t h e   l e f t   o f   t h e   t o g g l e   i t   s a y s   ' D i s p l a y :   ' . 
+ * * C h a n g e s : * * 
+ *   U p d a t e d   c a l c u l a t e T o t a l S c o p e   i n    o r e c a s t i n g . t s   t o   s t r i c t l y   i g n o r e   d y n a m i c a l l y   d i s a b l e d   s t a t u s e s   f r o m   b e i n g   i n c l u d e d   i n   t h e   T o t a l   S c o p e   m e t r i c   t a l l y . 
+ *   A d d e d   a   s t a t u s D i s p l a y M o d e   g e n e r i c   s t a t e   c o n s t r a i n t   t o   A p p . t s x   m a p p e d   t o   t h e   S t a t u s M a n a g e r   c o m p o n e n t ' s   o v e r a r c h i n g   s e g m e n t   l a y o u t . 
+ *   C r e a t e d   a   n e w   S e g m e n t e d C o n t r o l   T o g g l e   n a t i v e l y   b u i l t   i n s i d e   t h e   m o d a l   U I ' s   t i t l e   b l o c k   u s i n g   d y n a m i c   R e a c t   N o d e   i n j e c t i o n   t o   s u p p o r t   r e n d e r i n g   e x a c t   h e a d e r s   m a t c h i n g   r e q u i r e m e n t s . 
+ *   R e w r o t e   A p p . t s x   t o   c o n d e n s e   g e n e r a t e d   c h a r t i n g   d a t a   l o g i c a l l y   w h e n   s t a t u s D i s p l a y M o d e   = = =   ' c a t e g o r i e s ' ,   c o n d e n s i n g   d i s t i n c t   s t a t u s   p i p e l i n e s   d y n a m i c a l l y   w i t h i n   p u r e   c a t e g o r i c a l   c o l o r s   t o   o u t p u t   3   p r i m a r y   b l o c k   s t a c k s   v i a   a g g r e g a t i o n . 
+ *   V e r i f i e d   u n i t   t e s t s   ( 1 5 3   p a s s e d ) ,   c l e a n   f o r m a t t i n g ,   a n d   p r o d u c t i o n   b u i l d   m e t r i c s . 
+  
+ 

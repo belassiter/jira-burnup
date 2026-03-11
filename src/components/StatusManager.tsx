@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Button, Group, Text, Paper, Stack, Title, Popover, ColorSwatch, ColorPicker } from '@mantine/core';
+import { Modal, Button, Group, Text, Paper, Stack, Title, Popover, ColorSwatch, ColorPicker, Portal, SegmentedControl } from '@mantine/core';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { IconGripVertical } from '@tabler/icons-react';
 import { StatusConfig, StatusCategory } from '../types';
@@ -10,10 +10,12 @@ interface StatusManagerProps {
     availableStatuses: string[];
     statusConfigs: StatusConfig[]; 
     onConfigsChange: (configs: StatusConfig[]) => void;
+    displayMode: 'all' | 'categories';
+    onDisplayModeChange: (mode: 'all' | 'categories') => void;
 }
 
 const DEFAULT_COLORS = [
-    '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#d0ed57', 
+    '#8884d8', '#82ca9d', '#ffc658', '#ff7300', '#d0ed57',
     '#a4de6c', '#8dd1e1', '#83a6ed', '#8e4585', '#cb4335'
 ];
 
@@ -23,8 +25,11 @@ const CATEGORIES: { id: StatusCategory; label: string }[] = [
     { id: 'done', label: 'Done' }
 ];
 
-export function StatusManager({ opened, onClose, availableStatuses, statusConfigs, onConfigsChange }: StatusManagerProps) {
+export function StatusManager({ opened, onClose, availableStatuses, statusConfigs, onConfigsChange, displayMode, onDisplayModeChange }: StatusManagerProps) {
     const [localConfigs, setLocalConfigs] = useState<StatusConfig[]>([]);
+    const [initialConfigs, setInitialConfigs] = useState<StatusConfig[]>([]);
+    const [localDisplayMode, setLocalDisplayMode] = useState<'all' | 'categories'>(displayMode);
+    const [initialDisplayMode, setInitialDisplayMode] = useState<'all' | 'categories'>(displayMode);
 
     useEffect(() => {
         if (!opened) return;
@@ -57,7 +62,21 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
         // Effect is used to sync props to local state when modal opens
         // eslint-disable-next-line
         setLocalConfigs(newConfigs);
-    }, [opened, availableStatuses, statusConfigs]);
+        setInitialConfigs(JSON.parse(JSON.stringify(newConfigs)));
+        
+        setLocalDisplayMode(displayMode);
+        setInitialDisplayMode(displayMode);
+    }, [opened, availableStatuses, statusConfigs, displayMode]);
+
+    const handleClose = () => {
+        if (JSON.stringify(localConfigs) !== JSON.stringify(initialConfigs) || localDisplayMode !== initialDisplayMode) {
+            if (window.confirm("Are you sure you want to lose these changes?")) {
+                onClose();
+            }
+        } else {
+            onClose();
+        }
+    };
 
 
     const handleDragEnd = (result: any) => {
@@ -109,6 +128,7 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
 
     const handleSave = () => {
         onConfigsChange(localConfigs);
+        onDisplayModeChange(localDisplayMode);
         onClose();
     };
 
@@ -124,12 +144,43 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
         ));
     };
 
+    const setGroupColor = (categoryId: StatusCategory) => {
+        const colors = {
+            'not-started': '#e03131', // red
+            'started': '#f59f00',     // gold
+            'done': '#2b8a3e'         // green
+        };
+        const newColor = colors[categoryId];
+        
+        setLocalConfigs(prev => prev.map(c => 
+            c.category === categoryId ? { ...c, color: newColor } : c
+        ));
+    };
+
     const getItemsByCategory = (category: StatusCategory) => {
         return localConfigs.filter(c => c.category === category);
     };
 
+    const modalTitle = (
+        <Group justify="space-between" style={{ width: '100%', paddingRight: '20px' }}>
+            <Text fw={500} size="lg">Manage Statuses</Text>
+            <Group gap="xs">
+                <Text size="sm" fw={500}>Display:</Text>
+                <SegmentedControl
+                    size="xs"
+                    data={[
+                        { label: 'All statuses', value: 'all' },
+                        { label: 'Categories only', value: 'categories' }
+                    ]}
+                    value={localDisplayMode}
+                    onChange={(val) => setLocalDisplayMode(val as 'all' | 'categories')}
+                />
+            </Group>
+        </Group>
+    );
+
     return (
-        <Modal opened={opened} onClose={onClose} title="Manage Statuses" size="lg">
+        <Modal opened={opened} onClose={handleClose} title={modalTitle} size="xl" styles={{ title: { width: '100%' }}}>
             <Text size="sm" mb="md" c="dimmed">
                 Drag statuses between sections to categorize them. The order within sections and the sections (Not Started -{'>'} Started -{'>'} Done) determine the stacking order in the chart.
             </Text>
@@ -138,7 +189,16 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
                 <Stack gap="md">
                     {CATEGORIES.map(category => (
                         <Paper key={category.id} p="sm" withBorder bg="gray.0">
-                            <Title order={6} mb="sm" tt="uppercase" c="dimmed">{category.label}</Title>
+                            <Group justify="space-between" mb="sm">
+                                <Title order={6} tt="uppercase" c="dimmed" m={0}>{category.label}</Title>
+                                <Button 
+                                    size="compact-xs" 
+                                    variant="subtle"
+                                    onClick={() => setGroupColor(category.id)}
+                                >
+                                    Set to {category.id === 'not-started' ? 'Red' : category.id === 'started' ? 'Gold' : 'Green'}
+                                </Button>
+                            </Group>
                             <Droppable droppableId={category.id}>
                                 {(provided, snapshot) => (
                                     <div
@@ -154,60 +214,66 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
                                         <Stack gap="xs">
                                             {getItemsByCategory(category.id).map((config, index) => (
                                                 <Draggable key={config.name} draggableId={config.name} index={index}>
-                                                    {(provided) => (
-                                                        <Paper
-                                                            p="xs"
-                                                            shadow="xs"
-                                                            ref={provided.innerRef}
-                                                            {...provided.draggableProps}
-                                                            style={{
-                                                                ...provided.draggableProps.style,
-                                                                opacity: config.enabled ? 1 : 0.6,
-                                                                borderLeft: `4px solid ${config.color}`,
-                                                                display: 'flex',
-                                                                alignItems: 'center'
-                                                            }}
-                                                        >
-                                                            <Group gap="xs" style={{ flex: 1 }} wrap="nowrap">
-                                                                <div 
-                                                                    {...provided.dragHandleProps}
-                                                                    style={{ cursor: 'grab', display: 'flex', alignItems: 'center' }}
+                                                    {(provided, snapshot) => {
+                                                        const child = (
+                                                            <div
+                                                                ref={provided.innerRef}
+                                                                {...provided.draggableProps}
+                                                                style={provided.draggableProps.style}
+                                                            >
+                                                                <Paper
+                                                                    p="xs"
+                                                                    shadow="xs"
+                                                                    style={{
+                                                                        opacity: config.enabled ? 1 : 0.6,
+                                                                        borderLeft: `4px solid ${config.color}`,
+                                                                        display: 'flex',
+                                                                        alignItems: 'center'
+                                                                    }}
                                                                 >
-                                                                    <IconGripVertical size={14} color="gray" />
-                                                                </div>
+                                                                    <Group gap="xs" style={{ flex: 1 }} wrap="nowrap">
+                                                                        <div 
+                                                                            {...provided.dragHandleProps}
+                                                                            style={{ cursor: 'grab', display: 'flex', alignItems: 'center' }}      
+                                                                        >
+                                                                            <IconGripVertical size={14} color="gray" />
+                                                                        </div>
 
-                                                                <div style={{ flex: 1, overflow: 'hidden' }}>
-                                                                    <Text size="sm" truncate fw={500}>{config.name}</Text>
-                                                                </div>
+                                                                        <div style={{ flex: 1, overflow: 'hidden' }}>
+                                                                            <Text size="sm" truncate fw={500}>{config.name}</Text>
+                                                                        </div>
 
-                                                                <Button 
-                                                                    variant={config.enabled ? "light" : "subtle"}
-                                                                    color={config.enabled ? "blue" : "gray"}
-                                                                    size="compact-xs"
-                                                                    onClick={() => toggleStatus(config.name)}
-                                                                >
-                                                                    {config.enabled ? "On" : "Off"}
-                                                                </Button>
-                                                                
-                                                                <Popover position="bottom-end" shadow="md">
-                                                                    <Popover.Target>
-                                                                        <ColorSwatch 
-                                                                            color={config.color} 
-                                                                            size={30}
-                                                                            component="button"
-                                                                            style={{ cursor: 'pointer', border: '1px solid #ddd' }}
-                                                                        />
-                                                                    </Popover.Target>
-                                                                    <Popover.Dropdown>
-                                                                        <ColorPicker
-                                                                            value={config.color}
-                                                                            onChange={(c) => updateColor(config.name, c)}
-                                                                        />
-                                                                    </Popover.Dropdown>
-                                                                </Popover>
-                                                            </Group>
-                                                        </Paper>
-                                                    )}
+                                                                        <Button
+                                                                            variant={config.enabled ? "light" : "subtle"}
+                                                                            color={config.enabled ? "blue" : "gray"}
+                                                                            size="compact-xs"
+                                                                            onClick={() => toggleStatus(config.name)}
+                                                                        >
+                                                                            {config.enabled ? "On" : "Off"}
+                                                                        </Button>
+
+                                                                        <Popover position="bottom-end" shadow="md">
+                                                                            <Popover.Target>
+                                                                                <ColorSwatch
+                                                                                    color={config.color}
+                                                                                    size={30}
+                                                                                    component="button"
+                                                                                    style={{ cursor: 'pointer', border: '1px solid #ddd' }}
+                                                                                />
+                                                                            </Popover.Target>
+                                                                            <Popover.Dropdown>
+                                                                                <ColorPicker
+                                                                                    value={config.color}
+                                                                                    onChange={(c) => updateColor(config.name, c)}
+                                                                                />
+                                                                            </Popover.Dropdown>
+                                                                        </Popover>
+                                                                    </Group>
+                                                                </Paper>
+                                                            </div>
+                                                        );
+                                                        return snapshot.isDragging ? <Portal>{child}</Portal> : child;
+                                                    }}
                                                 </Draggable>
                                             ))}
                                             {provided.placeholder}
@@ -221,7 +287,7 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
             </DragDropContext>
 
             <Group justify="flex-end" mt="md">
-                <Button variant="default" onClick={onClose}>Cancel</Button>
+                <Button variant="default" onClick={handleClose}>Cancel</Button>
                 <Button onClick={handleSave}>Apply Changes</Button>
             </Group>
         </Modal>

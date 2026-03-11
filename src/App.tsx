@@ -61,10 +61,10 @@ export default function App() {
   // Status State
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [statusConfigs, setStatusConfigs] = useState<StatusConfig[]>([]);
+    const [statusDisplayMode, setStatusDisplayMode] = useState<'all' | 'categories'>('all');
 
-  // Derived State: Chart Data
-  const baseChartData = useMemo(() => {
-    if (!dateRange[0] || !dateRange[1]) return [];
+    const baseChartData = useMemo(() => {
+        if (!dateRange[0] || !dateRange[1]) return [];
     
     // We want the chart data to contain values for ALL statuses, even disabled ones.
     // This is crucial for forecasting, which needs to know the Total Scope (all work).
@@ -115,31 +115,68 @@ export default function App() {
       return generateForecast(baseChartData, forecastConfig, statusConfigs, endDateStr);
   }, [baseChartData, forecastConfig, statusConfigs, dateRange]);
 
+  // Determine what stacks to render based on Display Mode
+  const activeDisplayConfigs = useMemo(() => {
+      if (statusDisplayMode === 'all') {
+          return [...statusConfigs].reverse().filter(s => s.enabled);
+      } else {
+          return [
+              { name: 'Not Started', color: '#e03131', enabled: true, category: 'not-started' }, // standard redshift for Not Started
+              { name: 'Started', color: '#f59f00', enabled: true, category: 'started' }, // gold
+              { name: 'Done', color: '#2b8a3e', enabled: true, category: 'done' } // green
+          ].reverse(); // Render 'Done' at the bottom of the stack
+      }
+  }, [statusConfigs, statusDisplayMode]);
+
   // Combine Base Data with Forecast
   const chartData = useMemo(() => {
       // console.log(`Forecast Config: enabled=${forecastConfig.enabled}, dataLen=${baseChartData.length}`);
-      if (!forecastResult) return baseChartData;
+        let combined = [...baseChartData];
 
-      const combined = [...baseChartData]; // Clone
-      
-      // Merge forecast points into the base data.
-      forecastResult.forecastPoints.forEach(pt => {
-          const index = combined.findIndex(d => d.date === pt.date);
-          if (index !== -1) {
-              // Merge into existing point 
-              combined[index] = { ...combined[index], ...pt };
-          } 
-          // Else: Ignore points outside the chart's date range (shouldn't happen with strict endDate logic)
-      });
-      
-      return combined;
+        if (forecastResult) {
+            // Merge forecast points into the base data.
+            forecastResult.forecastPoints.forEach(pt => {
+                const index = combined.findIndex(d => d.date === pt.date);
+                if (index !== -1) {
+                    // Merge into existing point
+                    combined[index] = { ...combined[index], ...pt };
+                }
+                // Else: Ignore points outside the chart's date range (shouldn't happen with strict endDate logic)
+            });
+        }
 
-    }, [baseChartData, forecastResult]);
+        if (statusDisplayMode === 'categories') {
+            combined = combined.map(point => {
+                const newPoint = { ...point };
+                let notStarted = 0, started = 0, done = 0;
+                let hasVal = false;
+                statusConfigs.forEach(c => {
+                    if (c.enabled && typeof point[c.name] === 'number') {
+                        hasVal = true;
+                        if (c.category === 'not-started') notStarted += (point[c.name] as number);
+                        else if (c.category === 'started') started += (point[c.name] as number);
+                        else if (c.category === 'done') done += (point[c.name] as number);
+                    }
+                });
+                
+                if (hasVal) {
+                    newPoint['Not Started'] = notStarted;
+                    newPoint['Started'] = started;
+                    newPoint['Done'] = done;
+                }
+                
+                return newPoint;
+            });
+        }
 
-    const xAxisTicks = useMemo(() => {
-            const availableDates = chartData.map(d => d.date).filter(Boolean);
-            return getXAxisTicks(availableDates, dateRange[0], dateRange[1]);
-    }, [chartData, dateRange]);
+        return combined;
+
+      }, [baseChartData, forecastResult, statusConfigs, statusDisplayMode]);
+
+      const xAxisTicks = useMemo(() => {
+          const availableDates = chartData.map(d => d.date);
+          return getXAxisTicks(availableDates, dateRange[0], dateRange[1]);
+      }, [chartData, dateRange]);
 
   // Check credentials on mount
   useEffect(() => {
@@ -315,11 +352,13 @@ export default function App() {
       <AppShell.Main style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <CredentialsModal opened={credentialsOpen} onClose={closeCredentials} canClose={true} />
         <StatusManager 
-            opened={statusManagerOpen} 
+            opened={statusManagerOpen}
             onClose={closeStatusManager}
             availableStatuses={availableStatuses}
             statusConfigs={statusConfigs}
             onConfigsChange={setStatusConfigs}
+            displayMode={statusDisplayMode}
+            onDisplayModeChange={setStatusDisplayMode}
         />
         <ForecastModal
             opened={forecastModalOpen}
@@ -528,7 +567,7 @@ export default function App() {
                                 </defs>
 
                                 {/* Historical Data - Stacked */}
-                                {[...statusConfigs].reverse().filter(s => s.enabled).map((config) => {
+                                {activeDisplayConfigs.map((config) => {
                                     /* Use dynamic component based on graphType state */
                                     const TagName = (graphType === 'area' ? Area : Bar) as any;
                                     const props: any = {
