@@ -210,3 +210,72 @@ Summary:
 - Verified changes with 
 pm run verify (78 tests passed).
 
+
+## 3/11/2026 9:50 AM PT
+User: There are some strange things happening with the y-axis labels. I see 0, 50, 100, 192, when total scope is 182.
+I would expect to see only multiples of 50.
+
+Summary:
+- Identified the root cause in [src/App.tsx](src/App.tsx): Y-axis max was being computed with 5% padding (`Math.ceil(maxStack * 1.05)`), which produced non-step values like `192`.
+- Added [src/utils/chartAxis.ts](src/utils/chartAxis.ts) with deterministic Y-axis helpers:
+    - `getRoundedYAxisMax()` rounds the max value up to the next multiple of 50.
+    - `getYAxisTicks()` generates explicit ticks at fixed 50-unit intervals.
+- Updated [src/App.tsx](src/App.tsx) to use fixed Y-axis config:
+    - `domain={[0, yAxisConfig.domainMax]}`
+    - `ticks={yAxisConfig.ticks}`
+    This guarantees labels like `0, 50, 100, 150, 200`.
+- Added regression tests in [src/utils/chartAxis.test.ts](src/utils/chartAxis.test.ts) to lock this behavior.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+
+
+## 3/11/2026 10:10 AM PT
+User: Good. For x-axis labels, the increment should either be single days (if the time range is short), or integer multiples of weeks. For integer number of weeks, the date displayed should be a Monday, and the start/end dates should also be displayed regardless of day of the week.
+For example, 
+Date range: 2025-11-11 to 2026-04-17
+First date: 2025-11-11 (tuesday)
+Next date: A monday (for example, December 1 or December 8)
+Following dates: Mondays, same number of weeks inrement
+Last date: 2026-04-17
+
+Summary:
+- Added [src/utils/xAxis.ts](src/utils/xAxis.ts) to generate deterministic X-axis ticks:
+    - Short ranges (<= 21 days): show day-level ticks.
+    - Longer ranges: show `start` + Monday ticks at an integer week interval + `end`.
+- Updated [src/App.tsx](src/App.tsx) to wire `XAxis` with explicit `ticks={xAxisTicks}` and `interval={0}`.
+- Added tests in [src/utils/xAxis.test.ts](src/utils/xAxis.test.ts):
+    - Verifies short-range day mode.
+    - Verifies long-range Monday-only interior ticks with preserved start/end.
+- Fixed follow-up issues discovered by tests:
+    - Hook order in [src/App.tsx](src/App.tsx) (moved `xAxisTicks` memo below `chartData` declaration).
+    - Timezone-sensitive test setup by using `parseISO` instead of `new Date('YYYY-MM-DD')`.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+
+
+## 3/11/2026 10:20 AM PT
+User: Now I'm seeing overlapping dates at the beginning and the end. The 2nd date should be approximately the same distance as the integer number of weeks. 
+Also, the last date is now getting truncated off the right edge of the screen.
+
+Summary:
+- Updated [src/utils/xAxis.ts](src/utils/xAxis.ts) to improve long-range tick spacing:
+    - The first interior Monday tick is now anchored around one full `stepWeeks` interval from the start date (instead of the immediate next Monday), preventing start-label overlap.
+    - Added guard logic to remove the final interior Monday tick when it is too close to the required end-date tick, preventing end-label overlap.
+- Updated [src/App.tsx](src/App.tsx) `XAxis` rendering:
+    - Added `tickMargin={8}`.
+    - Added `padding={{ left: 8, right: 24 }}` so the final date label does not get clipped off the right edge.
+- Expanded [src/utils/xAxis.test.ts](src/utils/xAxis.test.ts) coverage:
+    - Validates first interior tick spacing is approximately one full step.
+    - Validates sufficient spacing before the end tick.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+
+
+## 3/11/2026 10:25 AM PT
+User: Ok, getting closer. I don't like that the plot extends beyond the date range. Instead, let's just add a little more padding on the right side of the plot so the date label doesn't get cut off.
+
+Summary:
+- Updated chart layout in [src/App.tsx](src/App.tsx):
+    - Removed `XAxis` domain padding (`padding={{ left: 8, right: 24 }}`) to stop visual extension beyond the selected date range.
+    - Increased `ComposedChart` right margin from `30` to `46` to preserve space for the final X-axis label.
+    - Kept `tickMargin={8}` for label readability.
+- Result: the plot domain now stays aligned with the actual date range, while the last date label has extra right-side room and does not clip.
+- Verification completed: `npm run lint`, `npm test`, and `npm run build` all passed.
+

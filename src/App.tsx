@@ -8,6 +8,8 @@ import { ForecastModal } from './components/ForecastModal';
 import { Area, Bar, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
 import { extractAllStatuses, processDailySnapshots } from './utils/dataProcessor';
 import { generateForecast } from './utils/forecasting';
+import { getRoundedYAxisMax, getYAxisTicks } from './utils/chartAxis';
+import { getXAxisTicks } from './utils/xAxis';
 import { Issue, StatusConfig, StatusCategory, ForecastConfig } from './types';
 import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload, IconRefresh, IconDice } from '@tabler/icons-react';
 import { toPng } from 'html-to-image';
@@ -73,11 +75,10 @@ export default function App() {
     return processDailySnapshots(issues, dateRange[0], dateRange[1], metric || 'count', statusesToTrack);
   }, [issues, dateRange, metric, availableStatuses]);
 
-  // Calculate Max Y for Chart Scaling (ignoring forecast) - memoized
-  const maxYValue = useMemo(() => {
+  // Calculate Y-axis domain/ticks with fixed 50-unit increments.
+  const yAxisConfig = useMemo(() => {
       let maxStack = 0;
-      if (!baseChartData || baseChartData.length === 0) return 'auto';
-      
+
       baseChartData.forEach(d => {
           let sum = 0;
           statusConfigs.forEach(c => {
@@ -88,7 +89,11 @@ export default function App() {
           });
           if (sum > maxStack) maxStack = sum;
       });
-      return maxStack > 0 ? Math.ceil(maxStack * 1.05) : 'auto'; // 5% padding
+
+      const domainMax = getRoundedYAxisMax(maxStack);
+      const ticks = getYAxisTicks(maxStack);
+
+      return { domainMax, ticks };
   }, [baseChartData, statusConfigs]);
 
   const forecastColor = useMemo(() => {
@@ -130,6 +135,11 @@ export default function App() {
       return combined;
 
     }, [baseChartData, forecastResult]);
+
+    const xAxisTicks = useMemo(() => {
+            const availableDates = chartData.map(d => d.date).filter(Boolean);
+            return getXAxisTicks(availableDates, dateRange[0], dateRange[1]);
+    }, [chartData, dateRange]);
 
   // Check credentials on mount
   useEffect(() => {
@@ -447,16 +457,19 @@ export default function App() {
                         <ResponsiveContainer width="100%" height="100%">
                             <ComposedChart
                                 data={chartData}
-                                margin={{ top: 10, right: 30, left: 20, bottom: 5 }}
+                                margin={{ top: 10, right: 46, left: 20, bottom: 5 }}
                             >
                                 <CartesianGrid strokeDasharray="3 3" />
                                 <XAxis 
                                     dataKey="date" 
-                                    interval="preserveStartEnd" // Attempt to show more ticks if possible, or control density
-                                    minTickGap={30} // Prevent overcrowding
+                                    ticks={xAxisTicks}
+                                    interval={0}
+                                    minTickGap={30}
+                                    tickMargin={8}
                                 />
                                 <YAxis 
-                                    domain={[0, maxYValue]}
+                                    domain={[0, yAxisConfig.domainMax]}
+                                    ticks={yAxisConfig.ticks}
                                     allowDataOverflow={true} 
                                 >
                                     <Label value={metricLabel || ''} angle={-90} position="insideLeft" style={{ textAnchor: 'middle' }} />
