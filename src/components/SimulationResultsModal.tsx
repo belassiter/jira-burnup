@@ -65,10 +65,10 @@ export function SimulationResultsModal({ opened, onClose, results, metricLabel, 
     const median = sorted.length % 2 !== 0 ? sorted[mid] : (sorted[mid - 1] + sorted[mid]) / 2;
     
     // 95% CI
-    const p05Index = Math.floor(sorted.length * 0.05);
-    const p95Index = Math.floor(sorted.length * 0.95);
-    const p05 = sorted[p05Index];
-    const p95 = sorted[p95Index];
+    const p025Index = Math.floor(sorted.length * 0.025);
+    const p975Index = Math.floor(sorted.length * 0.975);
+    const p025 = sorted[p025Index];
+    const p975 = sorted[p975Index];
     
     // 2. Create Bins for Histogram
     // Use Sturges' formula or simple sqrt logic
@@ -134,9 +134,9 @@ export function SimulationResultsModal({ opened, onClose, results, metricLabel, 
                             Distribution of {viewMode === 'rate' ? 'completion rates' : 'completion dates'} ({mcCycles} runs)
                         </Text>
                         <Group>
-                            <Text size="xs" c="dimmed">P05: {formatValue(p05)}</Text>
+                            <Text size="xs" c="dimmed">P02.5: {formatValue(p025)}</Text>
                             <Text size="xs" c="dimmed">Median: {formatValue(median)}</Text>
-                            <Text size="xs" c="dimmed">P95: {formatValue(p95)}</Text>
+                            <Text size="xs" c="dimmed">P97.5: {formatValue(p975)}</Text>
                         </Group>
                      </Stack>
                      
@@ -230,14 +230,14 @@ export function SimulationResultsModal({ opened, onClose, results, metricLabel, 
                                 <Label value={`Median: ${formatValue(median)}`} position="insideTopRight" angle={-90} offset={10} fill="#8884d8" />
                             </ReferenceLine>
 
-                            {/* P95 Line */}
-                            <ReferenceLine x={bins.find(b => p95 >= b.rangeStart && p95 <= b.rangeEnd)?.label} stroke="#82ca9d" strokeDasharray="3 3" strokeWidth={2}>
-                                <Label value={`95%: ${formatValue(p95)}`} position="insideTopRight" angle={-90} offset={10} fill="#82ca9d" />
+                            {/* P97.5 Line */}
+                            <ReferenceLine x={bins.find(b => p975 >= b.rangeStart && p975 <= b.rangeEnd)?.label} stroke="#82ca9d" strokeDasharray="3 3" strokeWidth={2}>
+                                <Label value={`97.5%: ${formatValue(p975)}`} position="insideTopRight" angle={-90} offset={10} fill="#82ca9d" />
                             </ReferenceLine>
 
-                             {/* P05 Line */}
-                             <ReferenceLine x={bins.find(b => p05 >= b.rangeStart && p05 <= b.rangeEnd)?.label} stroke="#82ca9d" strokeDasharray="3 3" strokeWidth={2}>
-                                <Label value={`5%: ${formatValue(p05)}`} position="insideTopRight" angle={-90} offset={10} fill="#82ca9d" />
+                             {/* P02.5 Line */}
+                             <ReferenceLine x={bins.find(b => p025 >= b.rangeStart && p025 <= b.rangeEnd)?.label} stroke="#82ca9d" strokeDasharray="3 3" strokeWidth={2}>
+                                <Label value={`2.5%: ${formatValue(p025)}`} position="insideTopRight" angle={-90} offset={10} fill="#82ca9d" />
                             </ReferenceLine>
 
                         </BarChart>

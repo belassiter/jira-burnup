@@ -115,6 +115,32 @@ export default function App() {
       return generateForecast(baseChartData, forecastConfig, statusConfigs, endDateStr);
   }, [baseChartData, forecastConfig, statusConfigs, dateRange]);
 
+  const forecastText = useMemo(() => {
+      if (!forecastConfig.enabled || !forecastResult || !forecastResult.completionDate) return null;
+      let text = `Forecasted Completion: ${forecastResult.completionDate}`;
+      
+      if (forecastConfig.showConfidence && forecastResult.simulationResults) {
+          const dates = forecastResult.simulationResults.completionDates;
+          if (dates && dates.length > 0) {
+              const sortedDates = [...dates].sort((a, b) => new Date(a).getTime() - new Date(b).getTime());
+              const p2_5Index = Math.floor(sortedDates.length * 0.025);
+              const medianIndex = Math.floor(sortedDates.length / 2);
+              const p97_5Index = Math.floor(sortedDates.length * 0.975);
+              
+              const medianDate = sortedDates[medianIndex];
+              const d1 = new Date(sortedDates[p2_5Index]).getTime();
+              const d2 = new Date(sortedDates[p97_5Index]).getTime();
+              
+              const spanDays = (d2 - d1) / (1000 * 60 * 60 * 24);
+              const halfSpanWeeks = Math.round((spanDays / 7) / 2);
+              
+              text = `Forecasted Completion: ${medianDate} ± ${halfSpanWeeks} weeks`;
+          }
+      }
+      
+      return text;
+  }, [forecastResult, forecastConfig]);
+
   // Determine what stacks to render based on Display Mode
   const activeDisplayConfigs = useMemo(() => {
       if (statusDisplayMode === 'all') {
@@ -486,9 +512,11 @@ export default function App() {
 
                         {/* Legend Placeholder */}
                          <div style={{ position: 'absolute', right: 10, top: 10, zIndex: 10 }}>
-                             {/* Recharts Legend renders here via portal or absolute positioning if we wanted, 
-                                 but currently it renders inside ResponsiveContainer. 
-                                 We leave this space empty or for future controls. */}
+                             {forecastText && (
+                                <Text size="sm" fw={600} style={{ backgroundColor: 'rgba(255,255,255,0.8)', padding: '2px 6px', borderRadius: 4, color: 'var(--mantine-color-dimmed)' }}>
+                                    {forecastText}
+                                </Text>
+                             )}
                         </div>
                     </div>
                     
