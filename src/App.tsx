@@ -1,19 +1,21 @@
 import { useState, useEffect, useMemo, useRef, useCallback } from 'react';
-import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, SegmentedControl, ActionIcon } from '@mantine/core';
+import { AppShell, Group, Text, TextInput, Button, Container, Paper, Stack, Select, SegmentedControl, ActionIcon, Notification, Loader } from '@mantine/core';
 import { DatePickerInput } from '@mantine/dates';
 import { useDisclosure } from '@mantine/hooks';
 import { CredentialsModal } from './components/CredentialsModal';
 import { StatusManager } from './components/StatusManager';
 import { ForecastModal } from './components/ForecastModal';
+import { ConfluenceSettingsModal } from './components/ConfluenceSettingsModal';
 import { Area, Bar, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
 import { extractAllStatuses, processDailySnapshots } from './utils/dataProcessor';
 import { generateForecast } from './utils/forecasting';
 import { getRoundedYAxisMax, getYAxisTicks } from './utils/chartAxis';
 import { getXAxisTicks } from './utils/xAxis';
-import { Issue, StatusConfig, StatusCategory, ForecastConfig } from './types';
-import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload, IconRefresh, IconDice } from '@tabler/icons-react';
+import { Issue, StatusConfig, StatusCategory, ForecastConfig, ConfluenceConfig } from './types';
+import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload, IconRefresh, IconDice, IconCheck, IconX } from '@tabler/icons-react';
 import { toPng } from 'html-to-image';
 import { SimulationResultsModal } from './components/SimulationResultsModal';
+import { getConfluenceAttachmentFilename, getLoadedConfluenceChartConfig, parseConfluencePageId } from './utils/confluence';
 
 import '@mantine/dates/styles.css';
 
@@ -36,6 +38,7 @@ export default function App() {
   const [statusManagerOpen, { open: openStatusManager, close: closeStatusManager }] = useDisclosure(false);
   const [forecastModalOpen, { open: openForecastModal, close: closeForecastModal }] = useDisclosure(false);
   const [simulationModalOpen, { open: openSimulationModal, close: closeSimulationModal }] = useDisclosure(false);
+    const [confluenceModalOpen, { open: openConfluenceModal, close: closeConfluenceModal }] = useDisclosure(false);
   
   // Data State
   const [jql, setJql] = useState('project = "JIRA" AND sprint in openSprints()');
@@ -62,6 +65,15 @@ export default function App() {
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [statusConfigs, setStatusConfigs] = useState<StatusConfig[]>([]);
   const [statusDisplayMode, setStatusDisplayMode] = useState<'all' | 'categories'>('categories');
+    const [confluenceConfig, setConfluenceConfig] = useState<ConfluenceConfig>({
+            confluenceUrl: '',
+            personalAccessToken: '',
+            pageUrl: '',
+            attachmentFilename: 'jira-burnup-latest.png'
+    });
+    const [publishingConfluence, setPublishingConfluence] = useState(false);
+    const [loadingConfig, setLoadingConfig] = useState(false);
+    const [snackbar, setSnackbar] = useState<{ message: string; color: 'green' | 'red' } | null>(null);
 
     const baseChartData = useMemo(() => {
         if (!dateRange[0] || !dateRange[1]) return [];
@@ -219,6 +231,31 @@ export default function App() {
     checkCreds();
   }, []);
 
+  useEffect(() => {
+      const loadConfluenceConfig = async () => {
+          try {
+              const savedConfig = await window.ipcRenderer.invoke('get-confluence-config');
+              if (savedConfig && typeof savedConfig === 'object') {
+                  setConfluenceConfig({
+                      confluenceUrl: savedConfig.confluenceUrl || '',
+                      personalAccessToken: savedConfig.personalAccessToken || '',
+                      pageUrl: savedConfig.pageUrl || '',
+                      attachmentFilename: getConfluenceAttachmentFilename(savedConfig.attachmentFilename)
+                  });
+              }
+          } catch (e) {
+              console.error('Failed to load Confluence settings', e);
+          }
+      };
+      loadConfluenceConfig();
+  }, []);
+
+  useEffect(() => {
+      if (!snackbar) return;
+      const timer = window.setTimeout(() => setSnackbar(null), 4000);
+      return () => window.clearTimeout(timer);
+  }, [snackbar]);
+
   const handleFetchData = async (query = jql) => {
       setLoading(true);
       try {
@@ -261,7 +298,11 @@ export default function App() {
           statusDisplayMode,
           graphTitle,
           graphType,
-          forecastConfig
+          forecastConfig,
+          confluenceConfig: {
+              pageUrl: confluenceConfig.pageUrl,
+              attachmentFilename: getConfluenceAttachmentFilename(confluenceConfig.attachmentFilename)
+          }
       };
       
       try {
@@ -278,14 +319,32 @@ export default function App() {
   };
 
   const loadConfiguration = () => {
+      setLoadingConfig(true);
+
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'application/json';
+      let fileSelectionChanged = false;
+
+      const handleWindowFocus = () => {
+          window.setTimeout(() => {
+              if (!fileSelectionChanged) {
+                  setLoadingConfig(false);
+              }
+          }, 200);
+      };
+      window.addEventListener('focus', handleWindowFocus, { once: true });
+
       input.onchange = (e: any) => {
+          fileSelectionChanged = true;
           const file = e.target.files[0];
-          if (!file) return;
+          if (!file) {
+              setLoadingConfig(false);
+              return;
+          }
+
           const reader = new FileReader();
-          reader.onload = (event) => {
+          reader.onload = async (event) => {
               try {
                   const config = JSON.parse(event.target?.result as string);
                   if (config.jql) setJql(config.jql);
@@ -299,13 +358,25 @@ export default function App() {
                   if (config.graphTitle) setGraphTitle(config.graphTitle);
                   if (config.graphType) setGraphType(config.graphType);
                   if (config.forecastConfig) setForecastConfig(config.forecastConfig);
+                  const loadedConfluenceChartConfig = getLoadedConfluenceChartConfig(config.confluenceConfig);
+                  setConfluenceConfig(prev => ({
+                      ...prev,
+                      pageUrl: loadedConfluenceChartConfig.pageUrl,
+                      attachmentFilename: loadedConfluenceChartConfig.attachmentFilename
+                  }));
 
                   if (config.jql) {
-                      handleFetchData(config.jql);
+                      await handleFetchData(config.jql);
                   }
               } catch {
                   alert("Invalid config file");
+              } finally {
+                  setLoadingConfig(false);
               }
+          };
+          reader.onerror = () => {
+              alert('Failed to read config file');
+              setLoadingConfig(false);
           };
           reader.readAsText(file);
       };
@@ -329,6 +400,71 @@ export default function App() {
         setAvailableStatuses([]);
         setStatusConfigs([]);
         setStatusDisplayMode('categories');
+        setConfluenceConfig(prev => ({
+            ...prev,
+            pageUrl: '',
+            attachmentFilename: 'jira-burnup-latest.png'
+        }));
+      }
+  };
+
+  const handleConfluenceConfigSave = async (config: ConfluenceConfig) => {
+      const normalizedConfig = {
+          ...config,
+          attachmentFilename: getConfluenceAttachmentFilename(config.attachmentFilename)
+      };
+      setConfluenceConfig(normalizedConfig);
+      const result = await window.ipcRenderer.invoke('save-confluence-config', normalizedConfig);
+      if (!result?.success) {
+          throw new Error(result?.error || 'Failed to save Confluence settings');
+      }
+  };
+
+  const handlePublishToConfluence = async () => {
+      if (!chartRef.current) return;
+
+      if (!confluenceConfig.confluenceUrl || !confluenceConfig.personalAccessToken || !confluenceConfig.pageUrl) {
+          setSnackbar({ message: 'Please fill Confluence settings before publishing.', color: 'red' });
+          openConfluenceModal();
+          return;
+      }
+
+      const parsedPageId = parseConfluencePageId(confluenceConfig.pageUrl);
+      if (!parsedPageId) {
+          setSnackbar({ message: 'Confluence page URL is missing a valid page ID.', color: 'red' });
+          openConfluenceModal();
+          return;
+      }
+
+      setPublishingConfluence(true);
+      try {
+          const filter = (node: HTMLElement) => {
+              if (node.classList && node.classList.contains('no-capture')) {
+                  return false;
+              }
+              return true;
+          };
+
+          const dataUrl = await toPng(chartRef.current, { cacheBust: true, backgroundColor: '#ffffff', filter });
+          const publishResult = await window.ipcRenderer.invoke('publish-confluence', {
+              config: {
+                  ...confluenceConfig,
+                  attachmentFilename: getConfluenceAttachmentFilename(confluenceConfig.attachmentFilename)
+              },
+              imageDataUrl: dataUrl,
+              graphTitle
+          });
+
+          if (!publishResult?.success) {
+              throw new Error(publishResult?.error || 'Confluence publish failed');
+          }
+
+          setSnackbar({ message: 'Published burnup chart to Confluence.', color: 'green' });
+      } catch (e: any) {
+          console.error('Failed publishing to Confluence', e);
+          setSnackbar({ message: `Confluence publish failed: ${e?.message || 'Unknown error'}`, color: 'red' });
+      } finally {
+          setPublishingConfluence(false);
       }
   };
 
@@ -371,6 +507,8 @@ export default function App() {
         <Group h="100%" px="md" justify="space-between">
           <Text fw={700}>Jira Burnup Chart</Text>
           <Group>
+                        <Button leftSection={<IconSettings size={16} />} color="blue" onClick={openConfluenceModal}>Confluence</Button>
+                        <Button color="blue" loading={publishingConfluence} onClick={handlePublishToConfluence}>Publish</Button>
             <Button leftSection={<IconRefresh size={16} />} variant="default" color="red" onClick={resetConfiguration}>Reset</Button>
             <Button leftSection={<IconDeviceFloppy size={16} />} variant="default" onClick={saveConfiguration}>Save Config</Button>
             <Button leftSection={<IconFolderOpen size={16} />} variant="default" onClick={loadConfiguration}>Load Config</Button>
@@ -380,6 +518,12 @@ export default function App() {
 
       <AppShell.Main style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
         <CredentialsModal opened={credentialsOpen} onClose={closeCredentials} canClose={true} />
+        <ConfluenceSettingsModal
+            opened={confluenceModalOpen}
+            onClose={closeConfluenceModal}
+            config={confluenceConfig}
+            onSave={handleConfluenceConfigSave}
+        />
         <StatusManager 
             opened={statusManagerOpen}
             onClose={closeStatusManager}
@@ -473,6 +617,21 @@ export default function App() {
 
 
                 <Paper ref={chartRef} p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
+                    {loadingConfig && (
+                        <div
+                            style={{
+                                position: 'absolute',
+                                inset: 0,
+                                zIndex: 100,
+                                backgroundColor: 'rgba(255, 255, 255, 0.75)',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center'
+                            }}
+                        >
+                            <Loader size="lg" />
+                        </div>
+                    )}
                     
                     {/* Header: Download + Title */}
                     <div style={{ position: 'relative', height: 50, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 10px' }}>
@@ -700,6 +859,17 @@ export default function App() {
                 </Paper>
             </Stack>
         </Container>
+                {snackbar && (
+                        <div style={{ position: 'fixed', right: 16, bottom: 16, zIndex: 1000 }}>
+                                <Notification
+                                        color={snackbar.color}
+                                        icon={snackbar.color === 'green' ? <IconCheck size={18} /> : <IconX size={18} />}
+                                        onClose={() => setSnackbar(null)}
+                                >
+                                        {snackbar.message}
+                                </Notification>
+                        </div>
+                )}
       </AppShell.Main>
     </AppShell>
   );

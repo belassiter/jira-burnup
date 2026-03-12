@@ -9,6 +9,21 @@ interface JiraSecrets {
   host: string;
   email?: string;
   apiToken: string;
+  confluenceUrl?: string;
+  confluencePersonalAccessToken?: string;
+}
+
+interface ConfluenceConfig {
+  confluenceUrl: string;
+  personalAccessToken: string;
+  pageUrl: string;
+  attachmentFilename: string;
+}
+
+interface PublishConfluencePayload {
+  config: ConfluenceConfig;
+  imageDataUrl: string;
+  graphTitle?: string;
 }
 
 function getSecrets(): JiraSecrets {
@@ -29,6 +44,175 @@ function getSecrets(): JiraSecrets {
   }
 
   throw new Error(`Secrets file not found. Checked: \n1. ${userDataPath}\n2. ${cwdSecretsPath}`);
+}
+
+function getPrimarySecretsPath(): string {
+  return path.join(app.getPath('userData'), 'jira-secrets.json');
+}
+
+function getOptionalSecrets(): Partial<JiraSecrets> | null {
+  try {
+    return getSecrets();
+  } catch {
+    return null;
+  }
+}
+
+function parseConfluencePageId(pageUrl: string): string | null {
+  const pageIdParamMatch = pageUrl.match(/[?&]pageId=(\d+)/i);
+  if (pageIdParamMatch) return pageIdParamMatch[1];
+
+  const pagesPathMatch = pageUrl.match(/\/pages\/(\d+)(?:[/?#]|$)/i);
+  if (pagesPathMatch) return pagesPathMatch[1];
+
+  const displayPathMatch = pageUrl.match(/\/display\/[^/]+\/(\d+)(?:[/?#]|$)/i);
+  if (displayPathMatch) return displayPathMatch[1];
+
+  return null;
+}
+
+function getConfluenceBaseUrl(confluenceUrl: string): string {
+  return confluenceUrl.trim().replace(/\/$/, '');
+}
+
+function getConfluenceAttachmentFilename(filename: string | undefined): string {
+  const trimmed = (filename || '').trim();
+  return trimmed || 'jira-burnup-latest.png';
+}
+
+function toPacificTimestamp(): string {
+  return new Intl.DateTimeFormat('en-US', {
+    timeZone: 'America/Los_Angeles',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false
+  }).format(new Date());
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+async function confluenceApiRequest(url: string, init: RequestInit): Promise<Response> {
+  const response = await fetch(url, init);
+  if (!response.ok) {
+    const errorBody = await response.text();
+    throw new Error(`Confluence API error (${response.status}): ${errorBody || response.statusText}`);
+  }
+  return response;
+}
+
+async function uploadOrReplaceAttachment(
+  baseUrl: string,
+  pageId: string,
+  token: string,
+  attachmentFilename: string,
+  imageBytes: Buffer,
+  comment: string
+): Promise<void> {
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json'
+  };
+
+  const findExistingUrl = `${baseUrl}/rest/api/content/${pageId}/child/attachment?filename=${encodeURIComponent(attachmentFilename)}&expand=version`;
+  const existingResp = await confluenceApiRequest(findExistingUrl, {
+    method: 'GET',
+    headers: authHeaders
+  });
+  const existingData = await existingResp.json() as { results?: Array<{ id: string }> };
+  const existingAttachmentId = existingData.results?.[0]?.id;
+
+  const form = new FormData();
+  form.append('file', new Blob([imageBytes], { type: 'image/png' }), attachmentFilename);
+  form.append('comment', comment);
+
+  const uploadUrl = existingAttachmentId
+    ? `${baseUrl}/rest/api/content/${pageId}/child/attachment/${existingAttachmentId}/data`
+    : `${baseUrl}/rest/api/content/${pageId}/child/attachment`;
+
+  await confluenceApiRequest(uploadUrl, {
+    method: 'POST',
+    headers: {
+      ...authHeaders,
+      'X-Atlassian-Token': 'no-check'
+    },
+    body: form
+  });
+}
+
+async function updateConfluencePageBodyWithImage(
+  baseUrl: string,
+  pageId: string,
+  token: string,
+  attachmentFilename: string,
+  graphTitle: string | undefined,
+  publishedAtPacific: string
+): Promise<void> {
+  const authHeaders = {
+    Authorization: `Bearer ${token}`,
+    Accept: 'application/json',
+    'Content-Type': 'application/json'
+  };
+
+  const contentResp = await confluenceApiRequest(`${baseUrl}/rest/api/content/${pageId}?expand=body.storage,version,title`, {
+    method: 'GET',
+    headers: authHeaders
+  });
+
+  const content = await contentResp.json() as {
+    id: string;
+    title: string;
+    version: { number: number };
+    body?: { storage?: { value?: string } };
+  };
+
+  const existingStorage = content.body?.storage?.value || '';
+  const escapedAttachmentFilename = escapeHtml(attachmentFilename);
+  const escapedGraphTitle = escapeHtml(graphTitle || 'Burnup Chart');
+
+  const block = [
+    '<!-- jira-burnup:start -->',
+    `<h2>${escapedGraphTitle}</h2>`,
+    `<p><strong>Last published:</strong> ${escapeHtml(publishedAtPacific)} PT</p>`,
+    `<p><ac:image ac:alt="${escapedAttachmentFilename}"><ri:attachment ri:filename="${escapedAttachmentFilename}" /></ac:image></p>`,
+    '<!-- jira-burnup:end -->'
+  ].join('');
+
+  const markerRegex = /<!-- jira-burnup:start -->[\s\S]*?<!-- jira-burnup:end -->/;
+  const updatedStorage = markerRegex.test(existingStorage)
+    ? existingStorage.replace(markerRegex, block)
+    : `${existingStorage}${existingStorage ? '<p></p>' : ''}${block}`;
+
+  const payload = {
+    id: content.id,
+    type: 'page',
+    title: content.title,
+    version: {
+      number: (content.version?.number || 1) + 1
+    },
+    body: {
+      storage: {
+        value: updatedStorage,
+        representation: 'storage'
+      }
+    }
+  };
+
+  await confluenceApiRequest(`${baseUrl}/rest/api/content/${pageId}`, {
+    method: 'PUT',
+    headers: authHeaders,
+    body: JSON.stringify(payload)
+  });
 }
 
 
@@ -72,17 +256,96 @@ ipcMain.handle('has-credentials', async () => {
 // Save credentials to userData/jira-secrets.json
 ipcMain.handle('save-credentials', async (_event, secrets: JiraSecrets) => {
   try {
-    const userDataPath = path.join(app.getPath('userData'), 'jira-secrets.json');
+    const userDataPath = getPrimarySecretsPath();
+    const existing = getOptionalSecrets() || {};
     // Basic validation
     if (!secrets.host || !secrets.apiToken) {
        return { success: false, error: "Host and API Token are required" };
     }
-    fs.writeFileSync(userDataPath, JSON.stringify(secrets));
+    fs.writeFileSync(userDataPath, JSON.stringify({
+      ...existing,
+      host: secrets.host,
+      email: secrets.email,
+      apiToken: secrets.apiToken
+    }));
     
     return { success: true };
   } catch (e: any) {
     console.error(e);
     return { success: false, error: e.message || 'Failed to save credentials' };
+  }
+});
+
+ipcMain.handle('get-confluence-config', async () => {
+  try {
+    const existing = getOptionalSecrets();
+    return {
+      confluenceUrl: existing?.confluenceUrl || '',
+      personalAccessToken: existing?.confluencePersonalAccessToken || ''
+    };
+  } catch (e: any) {
+    console.error(e);
+    return null;
+  }
+});
+
+ipcMain.handle('save-confluence-config', async (_event, config: ConfluenceConfig) => {
+  try {
+    const userDataPath = getPrimarySecretsPath();
+    const existing = getOptionalSecrets() || {};
+    fs.writeFileSync(userDataPath, JSON.stringify({
+      ...existing,
+      confluenceUrl: config.confluenceUrl || '',
+      confluencePersonalAccessToken: config.personalAccessToken || ''
+    }));
+    return { success: true };
+  } catch (e: any) {
+    console.error(e);
+    return { success: false, error: e.message || 'Failed to save Confluence config' };
+  }
+});
+
+ipcMain.handle('publish-confluence', async (_event, payload: PublishConfluencePayload) => {
+  try {
+    const config = payload.config;
+    if (!config?.confluenceUrl || !config?.personalAccessToken || !config?.pageUrl || !payload?.imageDataUrl) {
+      return { success: false, error: 'Missing Confluence settings or image data' };
+    }
+
+    const baseUrl = getConfluenceBaseUrl(config.confluenceUrl);
+    const pageId = parseConfluencePageId(config.pageUrl);
+    if (!pageId) {
+      return { success: false, error: 'Could not parse page ID from Confluence page URL' };
+    }
+
+    const attachmentFilename = getConfluenceAttachmentFilename(config.attachmentFilename);
+    const base64 = payload.imageDataUrl.replace(/^data:image\/png;base64,/, '');
+    const imageBytes = Buffer.from(base64, 'base64');
+    const publishedAtPacific = toPacificTimestamp();
+    const comment = `Published by Jira Burnup Chart at ${publishedAtPacific} PT`;
+
+    await uploadOrReplaceAttachment(
+      baseUrl,
+      pageId,
+      config.personalAccessToken,
+      attachmentFilename,
+      imageBytes,
+      comment
+    );
+
+    await updateConfluencePageBodyWithImage(
+      baseUrl,
+      pageId,
+      config.personalAccessToken,
+      attachmentFilename,
+      payload.graphTitle,
+      publishedAtPacific
+    );
+
+    return { success: true, publishedAt: `${publishedAtPacific} PT` };
+  } catch (e: any) {
+    console.error(e);
+    return { success: false, error: e.message || 'Failed to publish to Confluence' };
   }
 });
 

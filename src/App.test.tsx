@@ -14,6 +14,16 @@ vi.mock('recharts', async () => {
 
 describe('App', () => {
     it('renders the main layout without crashing', () => {
+        vi.mocked(window.ipcRenderer.invoke).mockImplementation((channel: string) => {
+            if (channel === 'has-credentials') {
+                return Promise.resolve(true);
+            }
+            if (channel === 'get-confluence-config') {
+                return Promise.resolve(null);
+            }
+            return Promise.resolve({});
+        });
+
         const { container } = render(
             <MantineProvider>
                 <App />

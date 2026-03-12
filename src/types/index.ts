@@ -37,3 +37,10 @@ export interface ForecastConfig {
     showConfidence: boolean;
     mcCycles?: number;
 }
+
+export interface ConfluenceConfig {
+    confluenceUrl: string;
+    personalAccessToken: string;
+    pageUrl: string;
+    attachmentFilename: string;
+}
