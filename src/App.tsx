@@ -61,7 +61,7 @@ export default function App() {
   // Status State
   const [availableStatuses, setAvailableStatuses] = useState<string[]>([]);
   const [statusConfigs, setStatusConfigs] = useState<StatusConfig[]>([]);
-    const [statusDisplayMode, setStatusDisplayMode] = useState<'all' | 'categories'>('all');
+  const [statusDisplayMode, setStatusDisplayMode] = useState<'all' | 'categories'>('categories');
 
     const baseChartData = useMemo(() => {
         if (!dateRange[0] || !dateRange[1]) return [];
@@ -258,6 +258,7 @@ export default function App() {
           dateRange,
           metric,
           statusConfigs,
+          statusDisplayMode,
           graphTitle,
           graphType,
           forecastConfig
@@ -294,6 +295,7 @@ export default function App() {
                   ]);
                   if (config.metric) setMetric(config.metric);
                   if (config.statusConfigs) setStatusConfigs(config.statusConfigs);
+                  if (config.statusDisplayMode) setStatusDisplayMode(config.statusDisplayMode);
                   if (config.graphTitle) setGraphTitle(config.graphTitle);
                   if (config.graphType) setGraphType(config.graphType);
                   if (config.forecastConfig) setForecastConfig(config.forecastConfig);
@@ -326,6 +328,7 @@ export default function App() {
         });
         setAvailableStatuses([]);
         setStatusConfigs([]);
+        setStatusDisplayMode('categories');
       }
   };
 
@@ -599,7 +602,6 @@ export default function App() {
                                     /* Use dynamic component based on graphType state */
                                     const TagName = (graphType === 'area' ? Area : Bar) as any;
                                     const props: any = {
-                                        key: config.name,
                                         dataKey: config.name,
                                         stackId: "a",
                                         fill: config.color,
@@ -608,9 +610,9 @@ export default function App() {
                                         type: "linear"
                                     };
                                     if (graphType === 'area') {
-                                        props.dot = { fill: config.color, stroke: 'black', strokeWidth: 1, r: 4 };
+                                        props.dot = false;
                                     }
-                                    return <TagName {...props} />;
+                                    return <TagName key={config.name} {...props} />;
                                 })}
                                 
                                 {/* Fallback when issues not loaded yet */}

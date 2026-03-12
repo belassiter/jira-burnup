@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { Modal, Button, Group, Text, Paper, Stack, Title, Popover, ColorSwatch, ColorPicker, Portal, SegmentedControl } from '@mantine/core';
+import { Modal, Button, Group, Text, Paper, Stack, Title, Popover, ColorSwatch, ColorPicker, Portal, SegmentedControl, ScrollArea } from '@mantine/core';
 import { DragDropContext, Droppable, Draggable } from '@hello-pangea/dnd';
 import { IconGripVertical } from '@tabler/icons-react';
 import { StatusConfig, StatusCategory } from '../types';
@@ -181,12 +181,20 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
 
     return (
         <Modal opened={opened} onClose={handleClose} title={modalTitle} size="xl" styles={{ title: { width: '100%' }}}>
-            <Text size="sm" mb="md" c="dimmed">
-                Drag statuses between sections to categorize them. The order within sections and the sections (Not Started -{'>'} Started -{'>'} Done) determine the stacking order in the chart.
-            </Text>
+            <Stack gap="md" mb="md">
+                <Text size="sm" c="dimmed">
+                    Drag statuses between sections to categorize them. The order within sections and the sections (Not Started -{'>'} Started -{'>'} Done) determine the stacking order in the chart.
+                </Text>
 
-            <DragDropContext onDragEnd={handleDragEnd}>
-                <Stack gap="md">
+                <Group justify="flex-end">
+                    <Button variant="default" onClick={handleClose}>Cancel</Button>
+                    <Button onClick={handleSave}>Apply Changes</Button>
+                </Group>
+            </Stack>
+
+            <ScrollArea h={500} offsetScrollbars>
+                <DragDropContext onDragEnd={handleDragEnd}>
+                    <Stack gap="md">
                     {CATEGORIES.map(category => (
                         <Paper key={category.id} p="sm" withBorder bg="gray.0">
                             <Group justify="space-between" mb="sm">
@@ -285,11 +293,7 @@ export function StatusManager({ opened, onClose, availableStatuses, statusConfig
                     ))}
                 </Stack>
             </DragDropContext>
-
-            <Group justify="flex-end" mt="md">
-                <Button variant="default" onClick={handleClose}>Cancel</Button>
-                <Button onClick={handleSave}>Apply Changes</Button>
-            </Group>
+            </ScrollArea>
         </Modal>
     );
 }
