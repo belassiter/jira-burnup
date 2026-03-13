@@ -24,6 +24,7 @@ interface PublishConfluencePayload {
   config: ConfluenceConfig;
   imageDataUrl: string;
   graphTitle?: string;
+  jql?: string;
 }
 
 function getSecrets(): JiraSecrets {
@@ -156,7 +157,9 @@ async function updateConfluencePageBodyWithImage(
   token: string,
   attachmentFilename: string,
   graphTitle: string | undefined,
-  publishedAtPacific: string
+  publishedAtPacific: string,
+  jql?: string,
+  jiraHost?: string
 ): Promise<void> {
   const authHeaders = {
     Authorization: `Bearer ${token}`,
@@ -179,19 +182,41 @@ async function updateConfluencePageBodyWithImage(
   const existingStorage = content.body?.storage?.value || '';
   const escapedAttachmentFilename = escapeHtml(attachmentFilename);
   const escapedGraphTitle = escapeHtml(graphTitle || 'Burnup Chart');
+  
+  let titleBlock = `<h2>${escapedGraphTitle}</h2>`;
+  if (jql && jiraHost) {
+      const cleanHost = jiraHost.replace(/^https?:\/\//, '').replace(/\/$/, '');
+      const jiraSearchUrl = `https://${cleanHost}/issues/?jql=${encodeURIComponent(jql)}`;
+      titleBlock = `<h2><a href="${escapeHtml(jiraSearchUrl)}">${escapedGraphTitle}</a></h2>`;
+  }
 
   const block = [
-    '<!-- jira-burnup:start -->',
-    `<h2>${escapedGraphTitle}</h2>`,
+    titleBlock,
     `<p><strong>Last published:</strong> ${escapeHtml(publishedAtPacific)} PT</p>`,
-    `<p><ac:image ac:alt="${escapedAttachmentFilename}"><ri:attachment ri:filename="${escapedAttachmentFilename}" /></ac:image></p>`,
-    '<!-- jira-burnup:end -->'
+    `<p><ac:image ac:alt="${escapedAttachmentFilename}"><ri:attachment ri:filename="${escapedAttachmentFilename}" /></ac:image></p>`
   ].join('');
 
-  const markerRegex = /<!-- jira-burnup:start -->[\s\S]*?<!-- jira-burnup:end -->/;
-  const updatedStorage = markerRegex.test(existingStorage)
-    ? existingStorage.replace(markerRegex, block)
-    : `${existingStorage}${existingStorage ? '<p></p>' : ''}${block}`;
+  let updatedStorage = existingStorage;
+  // Fallback: Remove old HTML comments if they exist from legacy renders
+  updatedStorage = updatedStorage.replace(/<!-- jira-burnup:(?:start|end) -->/g, '');
+
+  const regexSafeFilename = escapedAttachmentFilename.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const attachmentPattern = `<ri:attachment[^>]*ri:filename="${regexSafeFilename}"[^>]*?(?:/>|></ri:attachment>)`;
+  const imagePattern = `<ac:image[^>]*>\\s*${attachmentPattern}\\s*</ac:image>`;
+  const pWrappedImagePattern = `(?:<p[^>]*>\\s*)?${imagePattern}(?:\\s*</p>)?`;
+  const timestampPattern = `(?:<p[^>]*>\\s*<strong>Last published:</strong>(?:(?!</p>).)*?</p>\\s*)?`;
+  const headingPattern = `(?:<h[1-6][^>]*>(?:(?!</h[1-6]>).)*?</h[1-6]>\\s*)?`;
+
+  const dynamicReplacementRegex = new RegExp(
+    headingPattern + timestampPattern + pWrappedImagePattern,
+    'g'
+  );
+
+  if (dynamicReplacementRegex.test(updatedStorage)) {
+    updatedStorage = updatedStorage.replace(dynamicReplacementRegex, block);
+  } else {
+    updatedStorage = `${updatedStorage}${updatedStorage ? '<p></p>' : ''}${block}`;
+  }
 
   const payload = {
     id: content.id,
@@ -323,6 +348,14 @@ ipcMain.handle('publish-confluence', async (_event, payload: PublishConfluencePa
     const imageBytes = Buffer.from(base64, 'base64');
     const publishedAtPacific = toPacificTimestamp();
     const comment = `Published by Jira Burnup Chart at ${publishedAtPacific} PT`;
+    
+    let jiraHost = '';
+    try {
+        const secrets = getSecrets();
+        jiraHost = secrets.host;
+    } catch {
+        // ignore if we can't get secrets
+    }
 
     await uploadOrReplaceAttachment(
       baseUrl,
@@ -339,7 +372,9 @@ ipcMain.handle('publish-confluence', async (_event, payload: PublishConfluencePa
       config.personalAccessToken,
       attachmentFilename,
       payload.graphTitle,
-      publishedAtPacific
+      publishedAtPacific,
+      payload.jql,
+      jiraHost
     );
 
     return { success: true, publishedAt: `${publishedAtPacific} PT` };
@@ -376,7 +411,7 @@ function createWindow() {
   win = new BrowserWindow({
     width: 1200,
     height: 900,
-    icon: path.join(process.env.VITE_PUBLIC, 'icon.png'),
+    icon: path.join(process.env.VITE_PUBLIC as string, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
     },
@@ -391,7 +426,7 @@ function createWindow() {
     win.loadURL(VITE_DEV_SERVER_URL)
   } else {
     // win.loadFile('dist/index.html')
-    win.loadFile(path.join(process.env.DIST, 'index.html'))
+    win.loadFile(path.join(process.env.DIST as string, 'index.html'))
   }
 }
 

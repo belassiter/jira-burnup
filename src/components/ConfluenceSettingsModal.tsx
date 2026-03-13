@@ -31,6 +31,11 @@ export function ConfluenceSettingsModal({ opened, config, onClose, onSave }: Con
         setDraft(prev => ({ ...prev, [field]: pasted }));
     };
 
+    const handleChange = (field: keyof ConfluenceConfig) => (event: React.ChangeEvent<HTMLInputElement>) => {
+        const val = sanitizeText(event.currentTarget.value);
+        setDraft(prev => ({ ...prev, [field]: val }));
+    };
+
     useEffect(() => {
         if (opened) {
             setDraft({
@@ -76,7 +81,7 @@ export function ConfluenceSettingsModal({ opened, config, onClose, onSave }: Con
                     label="Confluence URL"
                     placeholder="https://confluence.company.com"
                     value={draft.confluenceUrl}
-                    onChange={(event) => setDraft(prev => ({ ...prev, confluenceUrl: sanitizeText(event.currentTarget.value) }))}
+                    onChange={handleChange('confluenceUrl')}
                     onPaste={handlePaste('confluenceUrl')}
                 />
 
@@ -84,7 +89,7 @@ export function ConfluenceSettingsModal({ opened, config, onClose, onSave }: Con
                     label="Personal Access Token"
                     placeholder="Paste token here"
                     value={draft.personalAccessToken}
-                    onChange={(event) => setDraft(prev => ({ ...prev, personalAccessToken: sanitizeText(event.currentTarget.value) }))}
+                    onChange={handleChange('personalAccessToken')}
                     onPaste={handlePaste('personalAccessToken')}
                 />
 
@@ -92,7 +97,7 @@ export function ConfluenceSettingsModal({ opened, config, onClose, onSave }: Con
                     label="Page URL"
                     placeholder="https://confluence.company.com/pages/viewpage.action?pageId=123456"
                     value={draft.pageUrl}
-                    onChange={(event) => setDraft(prev => ({ ...prev, pageUrl: sanitizeText(event.currentTarget.value) }))}
+                    onChange={handleChange('pageUrl')}
                     onPaste={handlePaste('pageUrl')}
                 />
 
@@ -100,7 +105,7 @@ export function ConfluenceSettingsModal({ opened, config, onClose, onSave }: Con
                     label="Attachment filename"
                     placeholder="jira-burnup-latest.png"
                     value={draft.attachmentFilename}
-                    onChange={(event) => setDraft(prev => ({ ...prev, attachmentFilename: sanitizeText(event.currentTarget.value) }))}
+                    onChange={handleChange('attachmentFilename')}
                     onPaste={handlePaste('attachmentFilename')}
                 />
 

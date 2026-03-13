@@ -324,19 +324,12 @@ export default function App() {
       const input = document.createElement('input');
       input.type = 'file';
       input.accept = 'application/json';
-      let fileSelectionChanged = false;
 
-      const handleWindowFocus = () => {
-          window.setTimeout(() => {
-              if (!fileSelectionChanged) {
-                  setLoadingConfig(false);
-              }
-          }, 200);
+      input.oncancel = () => {
+          setLoadingConfig(false);
       };
-      window.addEventListener('focus', handleWindowFocus, { once: true });
 
       input.onchange = (e: any) => {
-          fileSelectionChanged = true;
           const file = e.target.files[0];
           if (!file) {
               setLoadingConfig(false);
@@ -452,11 +445,13 @@ export default function App() {
                   attachmentFilename: getConfluenceAttachmentFilename(confluenceConfig.attachmentFilename)
               },
               imageDataUrl: dataUrl,
-              graphTitle
+              graphTitle,
+              jql
           });
 
-          if (!publishResult?.success) {
-              throw new Error(publishResult?.error || 'Confluence publish failed');
+          if (!publishResult.success) {
+              setSnackbar({ message: `Confluence publish failed: ${publishResult.error || 'Unknown error'}`, color: 'red' });
+              return;
           }
 
           setSnackbar({ message: 'Published burnup chart to Confluence.', color: 'green' });

@@ -97,3 +97,50 @@ Ran npm run verify successfully (lint, tests, build all passing).
 
 ## Verification
 Ran npm run verify successfully (lint, tests, build all passing).
+
+## 2026-03-13 10:05:17
+
+**User Prompt:**
+First, let's make some more small improvements.
+Right now, when it publishes to Confluence it just appends a new entry. Can we make it so if there is an existing PNG of the same name, it overwrites the image and the related text on the page?
+
+**Summary of Changes:**
+- Updated the Confluence \updateConfluencePageBodyWithImage\ IPC handler in \electron/main.ts\.
+- Replaced the simple append strategy with a dynamic RegEx replacement pattern that safely targets the exact \<ac:image>\ node matching the attachment filename.
+- The regex intelligently consumes the preceding \<h2>\ graph title and \<p>\ timestamp block (if present) and overrides the whole cluster in place.
+- Added regex to purge legacy HTML \<!-- jira-burnup -->\ comment blocks if they existed in the storage format from earlier versions.
+
+## 2026-03-13 10:14:40
+
+**User Prompt:**
+Here's the behavior I see.
+1. publish with filename1. filename1 appears
+2. publish with filename2. filename2 is appended below filename1
+3. publish filename2 again. filename1 is gone. new version of filename2 is present.
+Is it feasible to retain filename1 when replacing filename2?
+
+**Summary of Changes:**
+- Fixed a regex bug in \updateConfluencePageBodyWithImage\ (Catastrophic Backtracking) where the non-greedy wildcard \.*?\ in the \	imestampPattern\ allowed the regex engine to span multiple HTML nodes (consuming \ilename1\'s timestamp block and stretching all the way to \ilename2\'s image).
+- Updated the \headingPattern\ and \	imestampPattern\ to use strict negative lookaheads \(?:(?!</p>).)*?\ and \(?:(?!</h[1-6]>).)*?\ respectively. This enforces that the parsing is tightly bound to exactly the preceding sibling tag to the target attachment, securely ignoring other images on the same Confluence page.
+
+## 2026-03-13 10:47:22
+
+**User Prompt:**
+There used to be a spinner that would be active from when I press \Load Config\ until when all operations are done. Fix it.
+
+**Summary of Changes:**
+- Fixed an issue in App.tsx where the full-screen \loadingConfig\ spinner was prematurely terminating. 
+- Removed the flaky \window.addEventListener('focus', ...)\ timeout hack which incorrectly dismissed the spinner while the system file picker dialog was still open.
+- Replaced it with the native HTML5 \input.oncancel\ event listener to cleanly dismiss the spinner only if the user explicitly cancels out of the OS File Dialog. Wait operations correctly block until rendering finishes.
+
+## 2026-03-13 10:54:49
+
+**User Prompt:**
+When publishing to Confluence, I would like the title text to be a hyperlink to a Jira search of the JQL.
+Example
+JQL: (fixversion = "Mobi 7.9.2"  OR "Proposed Fix Version(s)" = "Mobi 7.9.2") and type in (Story, Task, Ticket, Spike) and project not in (RUN)
+URL: https://.../issues/?jql=...
+
+**Summary of Changes:**
+- Modified the Confluence publishing payload in both \electron/main.ts\ and \src/App.tsx\ to transport the current raw \jql\ string block out to the Node process.
+- Updated the \updateConfluencePageBodyWithImage\ generator to conditionally transform the raw <h2> graph text title into an HTML hyperlink <a href=...> that parses against Jira's \/issues/?jql=\ filter interface when both JQL and Jira valid hosts are captured from local credentials.
