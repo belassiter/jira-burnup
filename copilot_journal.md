@@ -144,3 +144,38 @@ URL: https://.../issues/?jql=...
 **Summary of Changes:**
 - Modified the Confluence publishing payload in both \electron/main.ts\ and \src/App.tsx\ to transport the current raw \jql\ string block out to the Node process.
 - Updated the \updateConfluencePageBodyWithImage\ generator to conditionally transform the raw <h2> graph text title into an HTML hyperlink <a href=...> that parses against Jira's \/issues/?jql=\ filter interface when both JQL and Jira valid hosts are captured from local credentials.
+
+## 2026-03-13 11:24:11
+
+**User Prompt:**
+Let's take a step towards scheduled publishing: bulk publishing. This will allow a user to set up a list of configs, and then click a button to publish each of them.
+1. New button in the header bar (left of "Publish"): "Bulk Publish"...
+
+**Summary of Changes:**
+- Added 4 new IPC Handlers in \electron/main.ts\ mapping native OS \dialog.showOpenDialog\, \dialog.showSaveDialog\, and raw \s\ reads/writes securely to the Electron renderer so configuration files can be selected strictly by absolute path.
+- Created \BulkPublishModal.tsx\, utilizing Mantine's \<Modal keepMounted={true}>\ to persist the configuration list between open/close toggles. Implemented strictly internal save/load operations for these lists targeting default filename \jira-burnup-bulk-publish-config.json\.
+- Implemented \handleBulkPublishSequence\ in \App.tsx\ to sequentially orchestrate the app state: parsing each loaded config into the main UI React state hooks, awaiting Jira JQL fetches, delaying \1500\ms to natively permit React's event loop to render new charts, exporting the canvas logic, and utilizing the existing backend Confluence API to publish the batch array continuously underneath a persistent blocking view spinner.
+
+## 2026-03-13 11:58:00
+**Prompt:** For configurations:
+1. Show just the filename (not the path). Show the full path\filename as a hover tooltip
+2. While it's performing the bulk publish, show an overlay list in the bottom-right of the screen. It should have a list of each filename. The active one should have a spinner on the left. Successful ones should get a green check on the left. Failures get a red X.
+3. Bulk publishing is including the spinner on the PNG. Make sure that doesn't happen.
+
+**Summary:** 
+- In BulkPublishModal.tsx, truncated paths to show only filenames while exposing the full path via Mantine tooltips.
+- Implemented global App state [bulkJobs, setBulkJobs] containing arrays of items mapped sequentially during bulk execution. 
+- Integrated a Paper overlay block situated bottom-right capturing the dynamically changing arrays (pending -> active -> success/failed), complete with specific Mantine components (Loader, IconCheck, IconX). Disappears slowly at the end.
+- Addressed html-to-image rendering bugs capturing loading animations by appending className="no-capture" to the specific loading overlay instance whilst also ensuring it exists within exclusionClasses.
+
+## 2026-03-13 11:58:00
+**Prompt:** For configurations:
+1. Show just the filename (not the path). Show the full path\filename as a hover tooltip
+2. While it's performing the bulk publish, show an overlay list in the bottom-right of the screen. It should have a list of each filename. The active one should have a spinner on the left. Successful ones should get a green check on the left. Failures get a red X.
+3. Bulk publishing is including the spinner on the PNG. Make sure that doesn't happen.
+
+**Summary:** 
+- In BulkPublishModal.tsx, truncated paths to show only filenames while exposing the full path via Mantine tooltips.
+- Implemented global App state [bulkJobs, setBulkJobs] containing arrays of items mapped sequentially during bulk execution. 
+- Integrated a Paper overlay block situated bottom-right capturing the dynamically changing arrays (pending -> active -> success/failed), complete with specific Mantine components (Loader, IconCheck, IconX). Disappears slowly at the end.
+- Addressed html-to-image rendering bugs capturing loading animations by appending className="no-capture" to the specific loading overlay instance whilst also ensuring it exists within exclusionClasses.

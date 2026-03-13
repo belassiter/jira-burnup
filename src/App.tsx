@@ -6,13 +6,14 @@ import { CredentialsModal } from './components/CredentialsModal';
 import { StatusManager } from './components/StatusManager';
 import { ForecastModal } from './components/ForecastModal';
 import { ConfluenceSettingsModal } from './components/ConfluenceSettingsModal';
+import { BulkPublishModal } from './components/BulkPublishModal';
 import { Area, Bar, Line, ComposedChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Label } from 'recharts';
 import { extractAllStatuses, processDailySnapshots } from './utils/dataProcessor';
 import { generateForecast } from './utils/forecasting';
 import { getRoundedYAxisMax, getYAxisTicks } from './utils/chartAxis';
 import { getXAxisTicks } from './utils/xAxis';
 import { Issue, StatusConfig, StatusCategory, ForecastConfig, ConfluenceConfig } from './types';
-import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload, IconRefresh, IconDice, IconCheck, IconX } from '@tabler/icons-react';
+import { IconDeviceFloppy, IconFolderOpen, IconSettings, IconDownload, IconRefresh, IconDice, IconCheck, IconX, IconStack2 } from '@tabler/icons-react';
 import { toPng } from 'html-to-image';
 import { SimulationResultsModal } from './components/SimulationResultsModal';
 import { getConfluenceAttachmentFilename, getLoadedConfluenceChartConfig, parseConfluencePageId } from './utils/confluence';
@@ -26,6 +27,12 @@ const METRICS = [
   { value: 'customfield_15505', label: 'Run Time (minutes)' }
 ];
 
+interface BulkPublishJob {
+    path: string;
+    filename: string;
+    status: 'pending' | 'active' | 'success' | 'failed';
+}
+
 function guessCategory(statusName: string): StatusCategory {
     const lower = statusName.toLowerCase();
     if (['done', 'closed', 'resolved', 'released', 'shipped', 'cancelled'].some(s => lower.includes(s))) return 'done';
@@ -38,8 +45,9 @@ export default function App() {
   const [statusManagerOpen, { open: openStatusManager, close: closeStatusManager }] = useDisclosure(false);
   const [forecastModalOpen, { open: openForecastModal, close: closeForecastModal }] = useDisclosure(false);
   const [simulationModalOpen, { open: openSimulationModal, close: closeSimulationModal }] = useDisclosure(false);
-    const [confluenceModalOpen, { open: openConfluenceModal, close: closeConfluenceModal }] = useDisclosure(false);
-  
+  const [confluenceModalOpen, { open: openConfluenceModal, close: closeConfluenceModal }] = useDisclosure(false);
+  const [bulkPublishModalOpen, { open: openBulkPublishModal, close: closeBulkPublishModal }] = useDisclosure(false);
+
   // Data State
   const [jql, setJql] = useState('project = "JIRA" AND sprint in openSprints()');
   const [issues, setIssues] = useState<Issue[]>([]);
@@ -73,6 +81,7 @@ export default function App() {
     });
     const [publishingConfluence, setPublishingConfluence] = useState(false);
     const [loadingConfig, setLoadingConfig] = useState(false);
+      const [bulkJobs, setBulkJobs] = useState<BulkPublishJob[]>([]);
     const [snackbar, setSnackbar] = useState<{ message: string; color: 'green' | 'red' } | null>(null);
 
     const baseChartData = useMemo(() => {
@@ -463,9 +472,108 @@ export default function App() {
       }
   };
 
-  const handleDownload = useCallback(() => {
+    const handleBulkPublishSequence = async (configPaths: string[]) => {
+        closeBulkPublishModal();
+        setLoadingConfig(true); 
+
+        const initialJobs: BulkPublishJob[] = configPaths.map(path => ({
+            path,
+            filename: path.split(/[/\\]/).pop() || 'unknown',
+            status: 'pending'
+        }));
+        setBulkJobs(initialJobs);
+
+        let successCount = 0;
+        let failCount = 0;
+
+        for (let i = 0; i < configPaths.length; i++) {
+            setBulkJobs(prev => prev.map((job, idx) => idx === i ? { ...job, status: 'active' } : job));
+            try {
+                const raw = await window.ipcRenderer.invoke('read-file-content', configPaths[i]);
+                const config = JSON.parse(raw);
+
+                if (config.jql) setJql(config.jql);
+                if (config.dateRange) setDateRange([
+                    config.dateRange[0] ? new Date(config.dateRange[0]) : null,
+                    config.dateRange[1] ? new Date(config.dateRange[1]) : null
+                ]);
+                if (config.metric) setMetric(config.metric);
+                if (config.statusConfigs) setStatusConfigs(config.statusConfigs);
+                if (config.statusDisplayMode) setStatusDisplayMode(config.statusDisplayMode);
+                if (config.graphTitle) setGraphTitle(config.graphTitle);
+                if (config.graphType) setGraphType(config.graphType);
+                if (config.forecastConfig) setForecastConfig(config.forecastConfig);
+
+                const loadedCConfig = getLoadedConfluenceChartConfig(config.confluenceConfig);
+                setConfluenceConfig(prev => ({
+                    ...prev,
+                    pageUrl: loadedCConfig.pageUrl,
+                    attachmentFilename: loadedCConfig.attachmentFilename
+                }));
+
+                if (config.jql) {
+                    await handleFetchData(config.jql);
+                }
+
+                await new Promise(r => setTimeout(r, 1500));
+
+                if (!chartRef.current) throw new Error("Chart reference lost");
+
+                const latestConfluenceCreds = await window.ipcRenderer.invoke('get-confluence-config');
+                const safeConfluenceURL = latestConfluenceCreds?.confluenceUrl || confluenceConfig.confluenceUrl;
+                const safeToken = latestConfluenceCreds?.personalAccessToken || confluenceConfig.personalAccessToken;
+
+                const filter = (node: HTMLElement) => {
+                    const exclusionClasses = ['recharts-tooltip-wrapper', 'no-capture'];
+                    return !exclusionClasses.some((classname) => node.classList?.contains(classname));
+                };
+                // wait another tick for dom repaints
+                await new Promise(r => setTimeout(r, 500));
+
+                const dataUrl = await toPng(chartRef.current, { cacheBust: true, backgroundColor: '#ffffff', filter });
+
+                const publishResult = await window.ipcRenderer.invoke('publish-confluence', {
+                    config: {
+                        confluenceUrl: safeConfluenceURL,
+                        personalAccessToken: safeToken,
+                        pageUrl: loadedCConfig.pageUrl,
+                        attachmentFilename: getConfluenceAttachmentFilename(loadedCConfig.attachmentFilename)
+                    },
+                    imageDataUrl: dataUrl,
+                    graphTitle: config.graphTitle,
+                    jql: config.jql
+                });
+
+                if (publishResult.success) {
+                    successCount++;
+                    setBulkJobs(prev => prev.map((job, idx) => idx === i ? { ...job, status: 'success' } : job));
+                } else {
+                    console.error("Bulk publish failed for", configPaths[i], publishResult.error);
+                    failCount++;
+                    setBulkJobs(prev => prev.map((job, idx) => idx === i ? { ...job, status: 'failed' } : job));
+                }
+
+            } catch (e: any) {
+                console.error("Failed handling bulk config:", configPaths[i], e);
+                failCount++;
+                setBulkJobs(prev => prev.map((job, idx) => idx === i ? { ...job, status: 'failed' } : job));
+            }
+        }
+
+        setLoadingConfig(false);
+        setSnackbar({
+            message: `Bulk Publish complete. ${successCount} succeeded, ${failCount} failed.`,
+            color: failCount > 0 ? 'red' : 'green'
+        });
+        
+        setTimeout(() => {
+            setBulkJobs([]);
+        }, 5000);
+    };
+
+    const handleDownload = useCallback(() => {
       if (!chartRef.current) return;
-      
+
       const filter = (node: HTMLElement) => {
            // Exclude elements with class 'no-capture'
            if (node.classList && node.classList.contains('no-capture')) {
@@ -502,8 +610,7 @@ export default function App() {
         <Group h="100%" px="md" justify="space-between">
           <Text fw={700}>Jira Burnup Chart</Text>
           <Group>
-                        <Button leftSection={<IconSettings size={16} />} color="blue" onClick={openConfluenceModal}>Confluence</Button>
-                        <Button color="blue" loading={publishingConfluence} onClick={handlePublishToConfluence}>Publish</Button>
+                        <Button leftSection={<IconSettings size={16} />} color="blue" onClick={openConfluenceModal}>Confluence</Button><Button leftSection={<IconStack2 size={16} />} color="blue" onClick={openBulkPublishModal}>Bulk Publish</Button><Button color="blue" loading={publishingConfluence} onClick={handlePublishToConfluence}>Publish</Button>
             <Button leftSection={<IconRefresh size={16} />} variant="default" color="red" onClick={resetConfiguration}>Reset</Button>
             <Button leftSection={<IconDeviceFloppy size={16} />} variant="default" onClick={saveConfiguration}>Save Config</Button>
             <Button leftSection={<IconFolderOpen size={16} />} variant="default" onClick={loadConfiguration}>Load Config</Button>
@@ -512,8 +619,7 @@ export default function App() {
       </AppShell.Header>
 
       <AppShell.Main style={{ height: '100vh', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
-        <CredentialsModal opened={credentialsOpen} onClose={closeCredentials} canClose={true} />
-        <ConfluenceSettingsModal
+        <CredentialsModal opened={credentialsOpen} onClose={closeCredentials} canClose={true} />          <BulkPublishModal opened={bulkPublishModalOpen} onClose={closeBulkPublishModal} onPublish={handleBulkPublishSequence} />        <ConfluenceSettingsModal
             opened={confluenceModalOpen}
             onClose={closeConfluenceModal}
             config={confluenceConfig}
@@ -613,8 +719,7 @@ export default function App() {
 
                 <Paper ref={chartRef} p={0} withBorder shadow="sm" style={{ flex: 1, display: 'flex', flexDirection: 'column', minHeight: 0, position: 'relative', overflow: 'hidden' }}>
                     {loadingConfig && (
-                        <div
-                            style={{
+                        <div                              className="no-capture"                            style={{
                                 position: 'absolute',
                                 inset: 0,
                                 zIndex: 100,
@@ -865,7 +970,41 @@ export default function App() {
                                 </Notification>
                         </div>
                 )}
+
+                {bulkJobs.length > 0 && (
+                    <Paper
+                        withBorder
+                        shadow="xl"
+                        p="md"
+                        style={{
+                            position: 'fixed',
+                            bottom: 24,
+                            right: 24,
+                            zIndex: 2000,
+                            width: 350,
+                            maxHeight: 400,
+                            overflowY: 'auto'
+                        }}
+                    >
+                        <Text fw={600} mb="sm">Bulk Publish Progress</Text>
+                        <Stack gap="xs">
+                            {bulkJobs.map((job, idx) => (
+                                <Group key={idx} justify="space-between" wrap="nowrap">
+                                    <Group gap="xs" wrap="nowrap" style={{ flex: 1, minWidth: 0 }}>
+                                        {job.status === 'pending' && <div style={{ width: 8, height: 8, borderRadius: '50%', backgroundColor: '#dee2e6', marginLeft: 4, marginRight: 4 }} />}
+                                        {job.status === 'active' && <Loader size={16} />}
+                                        {job.status === 'success' && <IconCheck color="green" size={16} />}
+                                        {job.status === 'failed' && <IconX color="red" size={16} />}
+                                        <Text size="sm" truncate>{job.filename}</Text>
+                                    </Group>
+                                    <Text size="xs" c="dimmed" tt="capitalize">{job.status}</Text>
+                                </Group>
+                            ))}
+                        </Stack>
+                    </Paper>
+                )}
       </AppShell.Main>
     </AppShell>
   );
 }
+

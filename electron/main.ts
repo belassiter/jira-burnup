@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog } from 'electron'
 import path from 'node:path'
 import fs from 'node:fs'
 import axios from 'axios'
@@ -396,6 +396,28 @@ ipcMain.handle('get-issues', async (_event, jql: string) => {
     }
 });
 
+
+// File System and Dialog Handlers for Bulk Publish
+ipcMain.handle('show-open-dialog', async (event, options) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!browserWindow) return { canceled: true };
+  return dialog.showOpenDialog(browserWindow, options);
+});
+
+ipcMain.handle('show-save-dialog', async (event, options) => {
+  const browserWindow = BrowserWindow.fromWebContents(event.sender);
+  if (!browserWindow) return { canceled: true };
+  return dialog.showSaveDialog(browserWindow, options);
+});
+
+ipcMain.handle('read-file-content', async (_event, filePath: string) => {
+  return fs.readFileSync(filePath, 'utf-8');
+});
+
+ipcMain.handle('write-file-content', async (_event, filePath: string, content: string) => {
+  fs.writeFileSync(filePath, content, 'utf-8');
+  return true;
+});
 
 // --- Electron Boilerplate ---
 
