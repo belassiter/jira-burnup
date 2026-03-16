@@ -436,6 +436,7 @@ function createWindow() {
     icon: path.join(process.env.VITE_PUBLIC as string, 'icon.png'),
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
+      backgroundThrottling: false,
     },
   })
 

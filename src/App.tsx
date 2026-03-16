@@ -515,9 +515,22 @@ export default function App() {
                     await handleFetchData(config.jql);
                 }
 
-                await new Promise(r => setTimeout(r, 1500));
-
                 if (!chartRef.current) throw new Error("Chart reference lost");
+
+                // Wait until the Recharts ResponsiveContainer has physically rendered to a non-zero size
+                for (let j = 0; j < 30; j++) {
+                    const surface = chartRef.current.querySelector('.recharts-surface');
+                    if (surface) {
+                        const rect = surface.getBoundingClientRect();
+                        if (rect.width > 0 && rect.height > 0) {
+                            break;
+                        }
+                    }
+                    await new Promise(r => setTimeout(r, 100));
+                }
+
+                // Add an additional small buffer to ensure DOM layout / repaints are fully settled
+                await new Promise(r => setTimeout(r, 500));
 
                 const latestConfluenceCreds = await window.ipcRenderer.invoke('get-confluence-config');
                 const safeConfluenceURL = latestConfluenceCreds?.confluenceUrl || confluenceConfig.confluenceUrl;
@@ -866,7 +879,8 @@ export default function App() {
                                         fill: config.color,
                                         stroke: config.color,
                                         name: config.name,
-                                        type: "linear"
+                                        type: "linear",
+                                        isAnimationActive: bulkJobs.length === 0
                                     };
                                     if (graphType === 'area') {
                                         props.dot = false;
@@ -885,6 +899,7 @@ export default function App() {
                                             fill={`hsl(${index * 40}, 70%, 50%)`} 
                                             stroke={`hsl(${index * 40}, 70%, 50%)`}
                                             type="linear"
+                                            isAnimationActive={bulkJobs.length === 0}
                                         />
                                      );
                                 })}

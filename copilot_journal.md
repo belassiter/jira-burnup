@@ -179,3 +179,22 @@ Let's take a step towards scheduled publishing: bulk publishing. This will allow
 - Implemented global App state [bulkJobs, setBulkJobs] containing arrays of items mapped sequentially during bulk execution. 
 - Integrated a Paper overlay block situated bottom-right capturing the dynamically changing arrays (pending -> active -> success/failed), complete with specific Mantine components (Loader, IconCheck, IconX). Disappears slowly at the end.
 - Addressed html-to-image rendering bugs capturing loading animations by appending className="no-capture" to the specific loading overlay instance whilst also ensuring it exists within exclusionClasses.
+ 
+ 
+## 2026-03-16 09:30:00
+**Prompt:** I ran bulk publish, first thing after doing npm run dev.
+It published all the images, but they all had problems. It looks like it's not waiting until everything is loaded. How can we make that more reliable? Some kind of signal that everything is loaded (plot, forecast, etc)? Something to stop it from going on to the next one until the publish is confirmed successful? I want it to be 100% reliable, the purpose here is to save time.
+
+**Summary:**
+- Modified App.tsx to conditionally disable chart animations (isAnimationActive: bulkJobs.length === 0) for Recharts Area and Bar components when a bulkJobs queue is active to prevent screenshot captures occurring mid-animation.
+- Implemented an internal polling verification loop before capturing images. It checks the exact bounds of .recharts-surface until it renders greater than 0 width/height, ensuring the Recharts ResponsiveContainer effectively stabilizes layout logic and React renders into the actual DOM tree.
+- Replaced the arbitrary 1500ms setTimeout with this robust polling logic to maximize performance and reliability.
+
+## 2026-03-16 09:50:00
+**Prompt:** I'm noticing that bulk publish doesn't run if the app isn't in the foreground.
+I started a bulk publish, started working in a different app. ~10 minutes later, I came back to the burnup app and it was just finishing the first publish.
+How can we make it run in the background without my input?
+
+**Summary:**
+- Modified  electron/main.ts  to set webPreferences.backgroundThrottling: false when creating the primary Electron  BrowserWindow.
+- Background throttling in Chromium aggressively pauses equestAnimationFrame and Javascript timers like setTimeout when a window loses focus. Because the image rendering pipeline heavily relies on React rendering and DOM measuring (which use these loops), disabling this limitation guarantees bulk publish operations process smoothly and seamlessly entirely in the background.
